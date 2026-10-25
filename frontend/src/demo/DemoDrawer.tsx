@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { SimpleView } from "../types";
 import { ago, anyLive, demo, OFFICIAL, type LogLine, type SimState, type Source, type Status } from "./demoApi";
 import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl } from "../sos";
+import { BleSection } from "./BleSection";
 import { fireTimerSoon } from "../sos/safetyTimer";
 import { MeshGraph } from "./MeshGraph";
 import { ScenariosTable } from "./ScenariosTable";
@@ -185,12 +186,8 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
           </div>
         </Section>
 
-        <Section id="ble" title="9. Real Bluetooth">
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-edge bg-raised px-4 py-3">
-            <span className="font-semibold">Real Bluetooth relay</span>
-            <span className="rounded-full border border-edge px-3 py-1 text-soft">OFF</span>
-          </div>
-          <p className="mt-2 text-[0.9rem] text-soft">Not in this build: the BLE relay is Phase 7, behind the flag MESH_REAL (off until two real phones exchange a packet). Help uses the simulated mesh above.</p>
+        <Section id="ble" title="9. Real Bluetooth (MESH_REAL)">
+          <BleSection />
         </Section>
       </div>
     </div>

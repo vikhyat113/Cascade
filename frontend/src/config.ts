@@ -103,6 +103,9 @@ export const CONFIG = {
     ttl: 5,                   // hop limit
     hopMs: [300, 900] as [number, number],   // random relay delay per hop
     gatewayRetryMs: 3000,     // store-and-forward: gateway retries the server this often
+    // MESH_REAL: the real Bluetooth relay (Phase 7). Off unless switched on in the Demo drawer (remembered
+    // on the phone); falls back to the simulated mesh whenever Bluetooth or the plugin is unavailable.
+    realDefault: false,
   },
   safetyTimer: {
     afterDeadlineMin: 10,     // "Are you home?" this long after "Be there by"

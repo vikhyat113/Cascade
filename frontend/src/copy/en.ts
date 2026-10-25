@@ -145,6 +145,8 @@ export const en = {
   "line.mapCredit": "Map data © OpenStreetMap contributors",
   "line.weatherCredit": "Weather by Open-Meteo.com",
 
+  "line.meshOn": "Passing on help requests nearby.",
+
   "reason.lit": "lit roads",
   "reason.mainRoads": "main roads",
   "reason.shopsOpen": "shops open on the way",

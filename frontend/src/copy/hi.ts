@@ -145,6 +145,8 @@ export const hi: Record<CopyKey, string> = {
   "line.mapCredit": "नक्शा डेटा © OpenStreetMap contributors",
   "line.weatherCredit": "मौसम: Open-Meteo.com",
 
+  "line.meshOn": "पास के मदद संदेश आगे भेज रहा है।",
+
   "reason.lit": "रोशनी वाली सड़कें",
   "reason.mainRoads": "मुख्य सड़कें",
   "reason.shopsOpen": "रास्ते में दुकानें खुली",

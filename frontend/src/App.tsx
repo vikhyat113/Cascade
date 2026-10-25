@@ -7,7 +7,7 @@ import { BackButton, Banner, Pill } from "./components/ui";
 import { call, listen } from "./lib/engine";
 import { useLive } from "./lib/live";
 import { lastTrip, loadFlag, loadPlace, myLocation, rememberTrip, saveFlag, savePlace } from "./lib/saved";
-import { alertContact } from "./sos";
+import { alertContact, restoreRealBluetooth } from "./sos";
 import { armTimer, disarmTimer, loadTimer, onTimerTapped, saveTimer, timerTimes } from "./sos/safetyTimer";
 import { Home, NEEDS } from "./screens/Home";
 import { OpenNow } from "./screens/OpenNow";
@@ -74,6 +74,7 @@ function Main() {
         setBy(c.ui_defaults.deadline);
         setFrom(await myLocation(c.ui_defaults, c.center, c.radius_m));
         setLateAlertState(await loadFlag("lateAlert"));
+        restoreRealBluetooth({ title: t("label.appName"), text: t("line.meshOn") }).catch(() => {});
         const saved = await lastTrip();
         if (!saved || stop) return;
         let v = await call("plan", saved.ask);

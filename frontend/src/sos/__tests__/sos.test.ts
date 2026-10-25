@@ -114,3 +114,19 @@ describe("safety timer times", () => {
     expect(timerTimes(1000 * MIN, 1020 * MIN, 1, 0).askAt).toBe(10 * MIN);
   });
 });
+
+describe("Bluetooth packet codes", () => {
+  it("round-trips every type and desk through the plugin's 2-bit codes", async () => {
+    const { BleMeshTransport } = await import("../ble");
+    for (const type of ["danger", "medical", "unsure", "ack"] as const) {
+      for (const to of ["police", "hospital", "contact"] as const) {
+        const p = { id: 4000000000, type, to, lat: 28.570512, lon: 77.322934, ts: 1792965886, hop: 2, ttl: 5 };
+        const w = BleMeshTransport.wire(p);
+        expect(w.type).toBeGreaterThanOrEqual(0);
+        expect(w.to).toBeGreaterThanOrEqual(0);
+        expect(BleMeshTransport.unwire(w).packet).toEqual(p);
+      }
+    }
+    expect(BleMeshTransport.unwire({ id: 1, type: 2, to: 3, ttl: 5, hop: 1, lat: 0, lon: 0, ts: 0 })).toMatchObject({ to: "test", packet: null });
+  });
+});
