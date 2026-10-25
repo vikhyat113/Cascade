@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NightWay</string>
+    <string name="title_activity_main">NightWay</string>
+    <string name="package_name">org.cascade.nightway</string>
+    <string name="custom_url_scheme">org.cascade.nightway</string>
+</resources>
