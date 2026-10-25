@@ -2,15 +2,16 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api } from "./api";
 import { useT, type CopyKey } from "./copy";
 import { MapCanvas } from "./components/MapCanvas";
+import { LayerPanel, type LayerState, type FacilityCounts } from "./components/LayerPanel";
 import { BackButton, Banner, Pill } from "./components/ui";
 import { useConnection } from "./lib/connection";
-import { lastTrip, loadPlace, myLocation, rememberTrip, savePlace } from "./lib/saved";
+import { isInsideCoverage, lastTrip, loadPlace, myLocation, rememberTrip, savePlace } from "./lib/saved";
 import { Home, NEEDS } from "./screens/Home";
 import { OpenNow } from "./screens/OpenNow";
 import { Result } from "./screens/Result";
 import { Search } from "./screens/Search";
 import { HelpSheet, Trip } from "./screens/Trip";
-import type { AppConfig, LatLon, Place, PlaceOnWay, SimpleView } from "./types";
+import type { AppConfig, AreaDiagnostics, LatLon, LayerMeta, Place, PlaceOnWay, SimpleView } from "./types";
 
 // Judges only: code-split, never in the first download (UI_SPEC §1.9, §5).
 const DemoDrawer = lazy(() => import("./demo/DemoDrawer"));
@@ -30,6 +31,42 @@ export default function App() {
 function Main() {
   const { t, lang } = useT();
   const [cfg, setCfg] = useState<AppConfig | null>(null);
+  const [diagnostics, setDiagnostics] = useState<AreaDiagnostics | null>(null);
+  const [showCoverage, setShowCoverage] = useState(true);
+  const [showDataCoverage, setShowDataCoverage] = useState(false);
+  const [layersMeta, setLayersMeta] = useState<LayerMeta[]>([]);
+  const [facilityCounts, setFacilityCounts] = useState<FacilityCounts>({
+    medicine: 0,
+    food: 0,
+    hospital: 0,
+    police: 0,
+  });
+  const [layerState, setLayerState] = useState<LayerState>({
+    showCoverage: true,
+    facilities: {
+      medicine: false,
+      food: false,
+      hospital: false,
+      police: false,
+      openOnly: false,
+      includeUnknown: true,
+    },
+    viirs: {
+      enabled: false,
+      opacity: 0.75,
+    },
+    thermal: {
+      enabled: false,
+      opacity: 0.75,
+      source: "night_surface",
+    },
+    weather: {
+      enabled: false,
+      opacity: 0.75,
+      hour: 2,
+      followClock: true,
+    },
+  });
   const [from, setFrom] = useState<Place | null>(null);
   const [to, setTo] = useState<Place | null>(null);
   const [home, setHome] = useState<Place | null>(null);
@@ -53,6 +90,10 @@ function Main() {
   const seen = useRef(new Set<string>());
   const conn = useConnection(view?.connection ?? null);
 
+  useEffect(() => {
+    setShowCoverage(layerState.showCoverage);
+  }, [layerState.showCoverage]);
+
   // ---- boot --------------------------------------------------------------------------------
   useEffect(() => {
     let stop = false;
@@ -62,7 +103,9 @@ function Main() {
       setHome(loadPlace("home", c.ui_defaults));
       setWork(loadPlace("work", c.ui_defaults));
       setBy(c.ui_defaults.deadline);
-      setFrom(await myLocation(c.ui_defaults, c.center, c.radius_m));
+      setFrom(await myLocation(c.ui_defaults, c.center, c.radius_m, c.polygon));
+      api.areaDiagnostics().then((diag) => { if (!stop) setDiagnostics(diag); }).catch(() => {});
+      api.layers().then((res) => { if (!stop) setLayersMeta(res); }).catch(() => {});
       // a shared link, or a trip this phone already started: carry on with it (from cache if no signal)
       const trip = new URLSearchParams(window.location.search).get("trip") || lastTrip();
       if (trip) {
@@ -110,7 +153,12 @@ function Main() {
 
   // ---- actions ----------------------------------------------------------------------------------
   const find = useCallback(async (dest: Place | null = to) => {
-    if (!from || !dest) return;
+    if (!from || !dest || !cfg) return;
+    if (!isInsideCoverage(from.lat, from.lon, cfg) || !isInsideCoverage(dest.lat, dest.lon, cfg)) {
+      setError(t("line.outsideArea"));
+      setScreen("home");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -132,7 +180,7 @@ function Main() {
     } finally {
       setBusy(false);
     }
-  }, [from, to, when, by, lang, view?.id, t]);
+  }, [from, to, when, by, lang, view?.id, cfg, t]);
 
   const start = async () => {
     if (!view || !shown) return;
@@ -156,6 +204,13 @@ function Main() {
 
   const openNeed = async (type: string) => {
     if (!from) return;
+    setLayerState((prev) => ({
+      ...prev,
+      facilities: {
+        ...prev.facilities,
+        [type]: true,
+      },
+    }));
     const n = NEEDS.find((x) => x.type === type)!;
     const base = { type, title: t(n.key as CopyKey), places: null, empty: null };
     setNeed(base);
@@ -176,6 +231,12 @@ function Main() {
   };
 
   const choosePlace = (p: Place, save: "home" | "work" | null) => {
+    if (cfg && !isInsideCoverage(p.lat, p.lon, cfg)) {
+      setError(t("line.outsideArea"));
+      setScreen("home");
+      return;
+    }
+    setError(null);
     if (save) {
       savePlace(save, p);
       (save === "home" ? setHome : setWork)({ ...p, kind: save });
@@ -186,10 +247,26 @@ function Main() {
   };
 
   const quickPlace = (slot: Place | "home" | "work") => {
-    if (typeof slot !== "string") return setTo(slot);
+    if (typeof slot !== "string") {
+      if (cfg && !isInsideCoverage(slot.lat, slot.lon, cfg)) {
+        setError(t("line.outsideArea"));
+        return;
+      }
+      setError(null);
+      return setTo(slot);
+    }
     const p = slot === "home" ? home : work;
-    if (p) setTo({ ...p, kind: slot });
-    else { setField("to"); setScreen("search"); }
+    if (p) {
+      if (cfg && !isInsideCoverage(p.lat, p.lon, cfg)) {
+        setError(t("line.outsideArea"));
+        return;
+      }
+      setError(null);
+      setTo({ ...p, kind: slot });
+    } else {
+      setField("to");
+      setScreen("search");
+    }
   };
 
   const onBackup = (id: string) => {
@@ -225,28 +302,117 @@ function Main() {
   const demo = { showDemo: SHOW_DEMO, onDemo: () => setDemoOpen(true) };
   return (
     <div className="relative h-full overflow-hidden">
-      <MapCanvas center={cfg.center} bottomPad={sheetH} offline={conn === "offline"} {...mapView}
+      <MapCanvas
+        center={cfg.center}
+        boundary={cfg.polygon}
+        bbox={cfg.bbox}
+        showCoverage={showCoverage}
+        showDataCoverage={showDataCoverage}
+        layerState={layerState}
+        from={from}
+        onTakeMeThere={(dest) => {
+          const target: Place = { lat: dest.lat, lon: dest.lon, name: dest.name, kind: null };
+          setTo(target);
+          find(target);
+        }}
+        onFacilityCounts={setFacilityCounts}
+        bottomPad={sheetH}
+        offline={conn === "offline"}
+        {...mapView}
         onPick={screen === "pick" ? async (lat, lon) => {
+          if (cfg && !isInsideCoverage(lat, lon, cfg)) {
+            setError(t("line.outsideArea"));
+            return;
+          }
+          setError(null);
           const name = await api.where(lat, lon, lang).then((r) => r.name).catch(() => t("label.pickedPoint"));
           choosePlace({ lat, lon, name }, field === "to" ? pickSave : null);
-        } : null} />
+        } : null}
+      />
+
+      <LayerPanel
+        layersMeta={layersMeta}
+        state={layerState}
+        onChange={setLayerState}
+        counts={facilityCounts}
+        simHour={2}
+      />
+
+      {/* Coverage legend toggle & Area label pill */}
+      <div className="fixed left-3 top-3 z-30 flex flex-col items-start gap-1.5 pointer-events-auto">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => {
+              const next = !showCoverage;
+              setShowCoverage(next);
+              setLayerState((s) => ({ ...s, showCoverage: next }));
+            }}
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[0.82rem] font-semibold shadow-md backdrop-blur-md transition-colors ${
+              showCoverage
+                ? "border-accent/60 bg-surface/90 text-accent"
+                : "border-edge bg-surface/75 text-soft hover:text-ink"
+            }`}
+            aria-pressed={showCoverage}
+            title={t("label.showCoverage")}
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: showCoverage ? "#8b7cff" : "#64748b" }}
+              aria-hidden="true"
+            />
+            {t("label.showCoverage")}
+          </button>
+          <button
+            onClick={() => setShowDataCoverage((v) => !v)}
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.82rem] font-semibold shadow-md backdrop-blur-md transition-colors ${
+              showDataCoverage
+                ? "border-good/60 bg-surface/90 text-good"
+                : "border-edge bg-surface/75 text-soft hover:text-ink"
+            }`}
+            aria-pressed={showDataCoverage}
+            title="Data coverage"
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: showDataCoverage ? "#34d399" : "#64748b" }}
+              aria-hidden="true"
+            />
+            Data
+          </button>
+        </div>
+        {showCoverage && (
+          <div className="rounded-full border border-edge bg-surface/90 px-3 py-0.5 text-[0.76rem] font-medium text-ink shadow backdrop-blur-md">
+            {t("fmt.coverageArea", {
+              area: String(cfg.area_km2 || diagnostics?.area_km2 || 49),
+              streets: String(diagnostics?.walk_edges || cfg.vertex_count || 8020),
+            })}
+          </div>
+        )}
+      </div>
+
       <Pill connection={conn} />
       {banner && <Banner id={banner.id} text={banner.text} onDone={() => setBannerId(null)}
         onSee={() => { if (banner.see_option_id) setShownId(banner.see_option_id); }} />}
 
       {screen === "home" && (
         <Home from={from} to={to} home={home} work={work} when={when} by={by} busy={busy} error={error}
-          onFrom={() => { setField("from"); setScreen("search"); }} onTo={() => { setField("to"); setScreen("search"); }}
+          onFrom={() => { setError(null); setField("from"); setScreen("search"); }}
+          onTo={() => { setError(null); setField("to"); setScreen("search"); }}
           onPlace={quickPlace} onWhen={setWhen} onBy={setBy} onFind={() => find()} onNeed={openNeed} onHeight={setSheetH} {...demo} />
       )}
       {screen === "search" && (
-        <Search field={field} onBack={() => setScreen("home")} onChoose={choosePlace} onHeight={setSheetH}
-          onPickMap={(save) => { setPickSave(save); setScreen("pick"); }} />
+        <Search field={field} onBack={() => { setError(null); setScreen("home"); }} onChoose={choosePlace} onHeight={setSheetH}
+          onPickMap={(save) => { setError(null); setPickSave(save); setScreen("pick"); }} />
       )}
       {screen === "pick" && (
-        <div className="fixed inset-x-0 bottom-6 z-20 flex justify-center px-3">
+        <div className="fixed inset-x-0 bottom-6 z-20 flex flex-col items-center gap-2 px-3">
+          {error && (
+            <div className="rounded-2xl bg-warn px-4 py-2.5 text-[1rem] font-bold text-night shadow-xl" role="alert">
+              {error}
+            </div>
+          )}
           <div className="flex w-full max-w-[480px] items-center gap-2 rounded-3xl bg-surface px-3 py-3 shadow-xl">
-            <BackButton onClick={() => setScreen("search")} />
+            <BackButton onClick={() => { setError(null); setScreen("search"); }} />
             <p className="text-[1.15rem] font-semibold">{t("line.tapMap")}</p>
           </div>
         </div>
@@ -260,8 +426,8 @@ function Main() {
           onHelp={() => setHelpAt(view?.trip?.position ? { lat: view.trip.position[0], lon: view.trip.position[1], name: "" } : from)} />
       )}
       {screen === "opennow" && need && (
-        <OpenNow title={need.title} places={need.places} empty={need.empty} onBack={() => setScreen("home")}
-          onPick={goTo} onHeight={setSheetH} />
+        <OpenNow title={need.title} currentType={need.type} places={need.places} empty={need.empty} onBack={() => setScreen("home")}
+          onPick={goTo} onSwitchNeed={openNeed} onHeight={setSheetH} />
       )}
       {helpAt && <HelpSheet at={helpAt} planId={view?.id ?? null} onClose={() => setHelpAt(null)} onGo={goTo} />}
 

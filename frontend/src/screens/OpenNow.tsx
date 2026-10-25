@@ -1,12 +1,28 @@
-import { useT } from "../copy";
+import { useT, type CopyKey } from "../copy";
 import { PLACE_ICON, STATE } from "../components/icons";
 import { BackButton, Sheet } from "../components/ui";
 import type { PlaceOnWay } from "../types";
+import { NEEDS } from "./Home";
 
 /** Screen 4: up to 5 places with name, distance, walking minutes and Open / Maybe open / Not sure. */
-export function OpenNow({ title, places, empty, onBack, onPick, onHeight }: {
-  title: string; places: PlaceOnWay[] | null; empty: string | null; onBack: () => void;
-  onPick: (p: PlaceOnWay) => void; onHeight: (h: number) => void;
+export function OpenNow({
+  title,
+  currentType,
+  places,
+  empty,
+  onBack,
+  onPick,
+  onSwitchNeed,
+  onHeight,
+}: {
+  title: string;
+  currentType?: string;
+  places: PlaceOnWay[] | null;
+  empty: string | null;
+  onBack: () => void;
+  onPick: (p: PlaceOnWay) => void;
+  onSwitchNeed?: (type: string) => void;
+  onHeight: (h: number) => void;
 }) {
   const { t } = useT();
   return (
@@ -15,6 +31,30 @@ export function OpenNow({ title, places, empty, onBack, onPick, onHeight }: {
         <BackButton onClick={onBack} />
         <h1 className="text-[1.4rem] font-bold">{title} · {t("label.openNow")}</h1>
       </div>
+
+      {onSwitchNeed && (
+        <div className="mt-2 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Facility Categories">
+          {NEEDS.map((n) => {
+            const active = currentType === n.type;
+            return (
+              <button
+                key={n.type}
+                onClick={() => onSwitchNeed(n.type)}
+                className={`flex min-h-[38px] items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-[0.84rem] font-bold transition-colors ${
+                  active
+                    ? "border-accent bg-accent text-night shadow"
+                    : "border-edge bg-raised text-soft hover:text-ink"
+                }`}
+                aria-pressed={active}
+              >
+                <span>{n.icon}</span>
+                <span>{t(n.key as CopyKey)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {places === null && <p className="mt-3 text-[1.1rem] text-soft">{t("line.finding")}</p>}
       {places?.length === 0 && <p className="mt-3 text-[1.1rem] text-warn">{empty || t("line.nothingOpen")}</p>}
       <ul className="mt-2 space-y-2">

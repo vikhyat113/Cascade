@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import type { SimpleView } from "../types";
+import { api } from "../api";
+import type { AreaDiagnostics, LayerMeta, SimpleView } from "../types";
 import { ago, demo, OFFICIAL, type SimState, type Source, type Status } from "./demoApi";
 import { ScenariosTable } from "./ScenariosTable";
 
@@ -8,13 +9,17 @@ import { ScenariosTable } from "./ScenariosTable";
 export default function DemoDrawer({ view, onClose }: { view: SimpleView | null; onClose: () => void }) {
   const [sim, setSim] = useState<SimState | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
+  const [areaDiag, setAreaDiag] = useState<AreaDiagnostics | null>(null);
+  const [layersList, setLayersList] = useState<LayerMeta[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [time, setTime] = useState("");
-  const [open, setOpen] = useState<Record<string, boolean>>({ break: true, happen: true, time: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({ break: true, happen: true, time: true, area: true, layers: true });
 
   const refresh = useCallback(() => {
     demo.sim().then(setSim).catch(() => {});
     demo.trust().then((t) => setSources(t.sources)).catch(() => {});
+    demo.area().then(setAreaDiag).catch(() => {});
+    api.layers().then(setLayersList).catch(() => {});
   }, []);
   useEffect(() => { refresh(); const id = window.setInterval(refresh, 2000); return () => window.clearInterval(id); }, [refresh]);
 
@@ -125,7 +130,136 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
           </ul>
         </Section>
 
-        <Section id="log" title="6. Change log (technical)">
+        <Section id="area" title="6. Area verification (Data Trust)">
+          {areaDiag ? (
+            <div className="space-y-2 text-[0.88rem]">
+              {areaDiag.placeholder_suspect && (
+                <div className="rounded-xl border border-bad/80 bg-bad/20 p-3 font-semibold text-bad">
+                  ⚠️ Red Warning: Placeholder / synthetic regular polygon suspect (distances from centroid within 3% or regular 17-gon)
+                </div>
+              )}
+              {areaDiag.area_mode === "circle_fallback" && (
+                <div className="rounded-xl border border-bad/80 bg-bad/20 p-3 font-semibold text-bad">
+                  ⚠️ Red Warning: Using circular fallback mode (no polygon configured)
+                </div>
+              )}
+              {areaDiag.stale_data && (
+                <div className="rounded-xl border border-bad/80 bg-bad/20 p-3 font-semibold text-bad">
+                  ⚠️ Red Warning: Stale data — graph or POIs generated before polygon file modified time! Run python scripts/fetch_all.py --force
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-raised p-2.5">
+                  <div className="text-[0.75rem] text-soft">Area Mode</div>
+                  <div className="font-bold">
+                    <span className={`inline-block rounded-md px-2 py-0.5 text-[0.8rem] ${areaDiag.area_mode === "polygon" ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}>
+                      {areaDiag.area_mode}
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-raised p-2.5">
+                  <div className="text-[0.75rem] text-soft">Coverage Area</div>
+                  <div className="font-bold">{areaDiag.area_km2} km² · {areaDiag.vertex_count} vertices</div>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-raised p-2.5">
+                <div className="text-[0.75rem] text-soft">Area Source File</div>
+                <div className="break-all font-mono text-[0.8rem] text-ink">{areaDiag.area_source}</div>
+                <div className="mt-1 text-[0.75rem] text-soft">Source modified: <span className="font-mono text-ink">{areaDiag.source_mtime || "N/A"}</span></div>
+              </div>
+
+              <div className="rounded-xl bg-raised p-2.5">
+                <div className="text-[0.75rem] text-soft">Bounding Box [minLon, minLat, maxLon, maxLat]</div>
+                <div className="font-mono text-[0.8rem] text-ink">{JSON.stringify(areaDiag.bbox)}</div>
+              </div>
+
+              <div className="rounded-xl bg-raised p-2.5">
+                <div className="text-[0.75rem] text-soft">Graph Nodes & Edges</div>
+                <div className="mt-1 flex justify-between text-[0.82rem]">
+                  <span>Walk: {areaDiag.walk_nodes} nodes, {areaDiag.walk_edges} edges</span>
+                  <span className="font-semibold text-good">{areaDiag.walk_nodes_inside}/{areaDiag.walk_nodes} inside</span>
+                </div>
+                <div className="mt-1 flex justify-between text-[0.82rem]">
+                  <span>Drive: {areaDiag.drive_nodes} nodes, {areaDiag.drive_edges} edges</span>
+                  <span className="font-semibold text-good">{areaDiag.drive_nodes_inside}/{areaDiag.drive_nodes} inside</span>
+                </div>
+                <div className="mt-1.5 flex items-center justify-between border-t border-edge/60 pt-1 font-semibold">
+                  <span>Share of nodes inside polygon:</span>
+                  <span className={areaDiag.share_nodes_inside >= 99 ? "text-good" : "text-bad"}>
+                    {areaDiag.share_nodes_inside.toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-raised p-2.5">
+                  <div className="text-[0.75rem] text-soft">POIs Inside Area</div>
+                  <div className="font-bold text-good">{areaDiag.pois_inside}</div>
+                </div>
+                <div className="rounded-xl bg-raised p-2.5">
+                  <div className="text-[0.75rem] text-soft">POIs Outside Area</div>
+                  <div className="font-bold text-soft">{areaDiag.pois_outside}</div>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-raised p-2.5">
+                <div className="text-[0.75rem] text-soft">Data Generation Timestamps</div>
+                <div className="mt-1 text-[0.8rem]">
+                  <div>graph_walk: <span className="font-mono text-ink">{areaDiag.walk_generated_at || "N/A"}</span></div>
+                  <div>pois.json: <span className="font-mono text-ink">{areaDiag.pois_generated_at || "N/A"}</span></div>
+                  <div>area modified: <span className="font-mono text-ink">{areaDiag.source_mtime || "N/A"}</span></div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-soft">Loading area diagnostics…</p>
+          )}
+        </Section>
+
+        <Section id="layers" title="7. Data Layers (Polygon-Clipped)">
+          <div className="space-y-3">
+            {layersList.map((layer) => {
+              const statusCfg = OFFICIAL[layer.status] || OFFICIAL.UNKNOWN;
+              const isStaleOrMissing = !layer.available || layer.older_than_area;
+              return (
+                <div key={layer.id} className="rounded-xl border border-edge bg-raised p-3 text-[0.85rem]">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-ink">{layer.name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className="rounded-md px-2 py-0.5 text-[0.75rem] font-bold"
+                        style={{ backgroundColor: `${statusCfg.color}22`, color: statusCfg.color }}
+                      >
+                        {statusCfg.word}
+                      </span>
+                      <span className="font-mono text-[0.78rem] text-soft">{ago(layer.age_s)}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-1.5 text-[0.8rem] text-soft">
+                    <div>Source: <span className="text-ink">{layer.source}</span></div>
+                    {layer.product && <div>Product: <span className="text-ink">{layer.product}</span></div>}
+                    <div>Resolution: <span className="text-ink">{layer.native_resolution}</span></div>
+                    <div>Inside polygon: <span className="text-ink font-semibold">{layer.cell_count} cells</span></div>
+                    <div>Missing share: <span className="text-good font-semibold">{layer.unknown_share}%</span></div>
+                  </div>
+
+                  {isStaleOrMissing && (
+                    <div className="mt-2 rounded-lg bg-bad/20 border border-bad/50 p-2 text-[0.8rem] font-semibold text-bad">
+                      {!layer.available
+                        ? "⚠ Layer file missing or failed to fetch (layer disabled)"
+                        : "⚠ Warning: Layer file is older than area.geojson!"}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+
+        <Section id="log" title="8. Change log (technical)">
           {log.length === 0 && <p className="text-soft">Find a way to see every re-plan explained here.</p>}
           <ol className="max-h-72 space-y-1 overflow-y-auto font-mono text-[0.85rem]">
             {log.map((e: { hhmm: string; severity: string; message: string; code: string }, i: number) => (

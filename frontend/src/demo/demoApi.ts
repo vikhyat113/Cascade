@@ -30,6 +30,7 @@ export const demo = {
   scenarios: () => j<{ id: string; name: string; description: string }[]>("/api/scenarios"),
   results: () => j<{ results: ScenarioResult[] }>("/api/scenarios/results"),
   runAll: () => j<{ results: ScenarioResult[] }>("/api/scenarios/run_all", {}),
+  area: () => fetch("/api/area/diagnostics").then((r) => r.json()) as Promise<import("../types").AreaDiagnostics>,
 };
 
 export const OFFICIAL: Record<Status, { word: string; user: string; color: string }> = {

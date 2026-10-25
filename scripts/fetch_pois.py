@@ -10,15 +10,20 @@ from __future__ import annotations
 
 import sys
 
-from common import CFG, DATA, overpass, utc_now_iso, write_json
+from common import CFG, DATA, get_area, overpass, utc_now_iso, write_json
 
-LAT, LON, R = CFG["center"]["lat"], CFG["center"]["lon"], CFG["radius_m"]
-A = f"(around:{R},{LAT},{LON})"
+area = get_area()
+if area is not None:
+    A = f"({area.overpass_poly_str})"
+else:
+    LAT, LON, R = CFG["center"]["lat"], CFG["center"]["lon"], CFG["radius_m"]
+    A = f"(around:{R},{LAT},{LON})"
+
 
 QUERY = f"""
 [out:json][timeout:170];
 (
-  nwr["amenity"~"^(hospital|clinic|doctors|pharmacy|police|fire_station|fuel|atm|bank|cafe|fast_food|restaurant|bus_station|toilets)$"]{A};
+  nwr["amenity"~"^(hospital|clinic|doctors|pharmacy|police|fire_station|fuel|atm|bank|cafe|fast_food|restaurant|food_court|bus_station|toilets)$"]{A};
   nwr["healthcare"~"^(hospital|clinic|pharmacy)$"]{A};
   nwr["shop"~"^(convenience|supermarket|chemist|bakery|kiosk)$"]{A};
   node["highway"="bus_stop"]{A};
@@ -56,7 +61,7 @@ def category(t: dict) -> str | None:
         return "pharmacy"
     if a in ("police", "fire_station", "fuel", "atm", "bank", "toilets"):
         return a
-    if a in ("cafe", "fast_food", "restaurant") or s == "bakery":
+    if a in ("cafe", "fast_food", "restaurant", "food_court") or s == "bakery":
         return "food"
     if s in ("convenience", "supermarket", "kiosk"):
         return "shop"
@@ -97,7 +102,7 @@ def main():
     print(f"  {hours} elements carry opening_hours")
     write_json(DATA / "pois.json", {"generated_at": utc_now_iso(),
                                      "source": "OpenStreetMap contributors via Overpass API",
-                                     "center": CFG["center"], "radius_m": R, "pois": out})
+                                     "center": CFG["center"], "radius_m": CFG["radius_m"], "pois": out})
 
 
 if __name__ == "__main__":
