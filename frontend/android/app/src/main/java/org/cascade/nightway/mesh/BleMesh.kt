@@ -36,7 +36,7 @@ object BleMesh {
     const val COMPANY_ID = 0xFFFF
     private const val VERSION = 1
     private const val ADVERTISE_MS = 15_000L
-    private const val MAX_ADVERTISING = 3
+    private const val MAX_ADVERTISING = 3          // lowered at run time if the phone refuses more
     private const val SEEN_KEEP_MS = 10 * 60_000L
     private const val PEER_WINDOW_MS = 60_000L
 
@@ -73,6 +73,8 @@ object BleMesh {
     var relayed = 0; private set
     var sent = 0; private set
     var lastPacketAt = 0L; private set
+    var lastError: String? = null; private set
+    private var maxAdvertising = MAX_ADVERTISING
 
     private val handler = Handler(Looper.getMainLooper())
     private val seen = LinkedHashMap<String, Long>()
@@ -140,7 +142,7 @@ object BleMesh {
 
     private fun pump() {
         val ad = advertiser ?: return
-        while (running && advertising.size < MAX_ADVERTISING && queue.isNotEmpty()) {
+        while (running && advertising.size < maxAdvertising && queue.isNotEmpty()) {
             val p = queue.removeFirst()
             val slot = "${p.key}:${p.hop}:${System.nanoTime()}"
             val settings = AdvertiseSettings.Builder()
@@ -156,8 +158,15 @@ object BleMesh {
                 .build()
             val cb = object : AdvertiseCallback() {
                 override fun onStartFailure(errorCode: Int) {
-                    log("advertise failed ($errorCode)")
                     advertising.remove(slot)
+                    if (errorCode == ADVERTISE_FAILED_TOO_MANY_ADVERTISERS && maxAdvertising > 1) {
+                        maxAdvertising = maxOf(1, advertising.size)    // this phone allows fewer at once:
+                        queue.addFirst(p)                              // keep the packet and retry when a slot frees
+                        log("phone allows $maxAdvertising advert(s) at a time")
+                    } else {
+                        lastError = "advertise failed (${advertiseError(errorCode)})"
+                        log(lastError!!)
+                    }
                     handler.post { pump() }
                 }
             }
@@ -198,9 +207,19 @@ object BleMesh {
         }
 
         override fun onScanFailed(errorCode: Int) {
-            log("scan failed ($errorCode)")
+            lastError = "scan failed (code $errorCode)"
+            log(lastError!!)
         }
     }
 
     private fun log(m: String) { listener?.onLog(m) }
+
+    private fun advertiseError(code: Int) = when (code) {
+        AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE -> "data too large"
+        AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "too many advertisers"
+        AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED -> "already started"
+        AdvertiseCallback.ADVERTISE_FAILED_INTERNAL_ERROR -> "internal error"
+        AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "not supported on this phone"
+        else -> "code $code"
+    }
 }

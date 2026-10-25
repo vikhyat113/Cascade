@@ -7,11 +7,14 @@ import { CONFIG } from "../config";
 import type { Desk, Dispatch, MeshTransport, SosPacket, SosType } from "./types";
 
 type Wire = { id: number; type: number; to: number; ttl: number; hop: number; lat: number; lon: number; ts: number };
+export type Diagnosis = { model: string; android: number; hasBle: boolean; bluetoothOn: boolean; canAdvertise: boolean; locationOn: boolean;
+  permissions: Record<string, string>; running: boolean; lastError: string | null };
 type NativeStatus = { running: boolean; peers: number; relayed: number; sent: number; lastPacketAt: number | null };
 interface MeshNative {
   start(o: { title: string; text: string }): Promise<NativeStatus>;
   stop(): Promise<NativeStatus>;
   status(): Promise<NativeStatus>;
+  diagnose(): Promise<Diagnosis>;
   broadcast(p: Wire): Promise<NativeStatus>;
   addListener(ev: "packet", f: (p: Wire & { rssi: number }) => void): Promise<PluginListenerHandle>;
   addListener(ev: "log", f: (m: { message: string }) => void): Promise<PluginListenerHandle>;
@@ -41,6 +44,7 @@ export class BleMeshTransport implements MeshTransport {
 
   /** Only inside the Android app with the plugin compiled in. */
   static available(): boolean { return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("Mesh"); }
+  static diagnose(): Promise<Diagnosis> { return Native.diagnose(); }
 
   async start(words: { title: string; text: string }): Promise<void> {
     if (!BleMeshTransport.available()) throw new Error("only in the Android app");

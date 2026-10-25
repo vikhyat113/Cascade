@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { CONFIG } from "../config";
 import { useT } from "../copy";
 import { ble, getDispatchUrl, meshMode, setRealBluetooth } from "../sos";
-import { BleMeshTransport } from "../sos/ble";
+import { BleMeshTransport, type Diagnosis } from "../sos/ble";
 import { ago } from "./demoApi";
 
 /** Demo drawer: the real Bluetooth relay. Switch, live counters, a test packet for the two-phone check. */
@@ -11,6 +11,9 @@ export function BleSection() {
   const [, redraw] = useState(0);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [diag, setDiag] = useState<Diagnosis | null>(null);
+  const check = () => { if (BleMeshTransport.available()) BleMeshTransport.diagnose().then(setDiag).catch((e) => setMsg(`check failed: ${e?.message ?? e}`)); };
+  useEffect(check, []);
   useEffect(() => {
     const off = ble.watch(() => redraw((n) => n + 1));
     const id = window.setInterval(() => redraw((n) => n + 1), 1000);
@@ -24,6 +27,7 @@ export function BleSection() {
     const err = await setRealBluetooth(!on, { title: t("label.appName"), text: t("line.meshOn") });
     setMsg(err ? `Could not start: ${err}. Help uses the simulated mesh.` : !on ? "Real Bluetooth ON: this phone relays and, if it reaches the server, acts as gateway." : "Real Bluetooth OFF");
     setBusy(false);
+    check();
   };
   const s = ble.stats;
   const here = { lat: 28.5705, lon: 77.3229 };
@@ -34,6 +38,25 @@ export function BleSection() {
         <span>Real Bluetooth relay</span><span className={on ? "text-good" : "text-soft"}>{busy ? "…" : on ? "ON" : "OFF"}</span>
       </button>
       {!available && <p className="text-[0.9rem] text-soft">Only in the Android app (not in the browser).</p>}
+      {diag && (
+        <div className="rounded-2xl bg-raised px-3 py-2 text-[0.9rem]">
+          <p className="font-semibold">Checks · {diag.model} · Android API {diag.android}</p>
+          <ul className="mt-1 space-y-0.5">
+            {([
+              ["Bluetooth LE hardware", diag.hasBle, ""],
+              ["Bluetooth switched on", diag.bluetoothOn, "turn Bluetooth on"],
+              ["Phone can broadcast (BLE advertising)", diag.canAdvertise, "this phone cannot send; it can still listen and pass on nothing"],
+              ["Location switched on", diag.locationOn, "Android only returns Bluetooth scan results with Location on"],
+              ...Object.entries(diag.permissions).map(([k, v]) => [`Permission: ${k === "ble" ? "Nearby devices" : k}`, v === "granted", `is "${v}": Settings → Apps → NightWay → Permissions`] as [string, boolean, string]),
+              ["Relay running", diag.running, "switch it ON above"],
+            ] as [string, boolean, string][]).map(([label, ok, fix]) => (
+              <li key={label} className={ok ? "text-good" : "text-bad"}>{ok ? "✓" : "✗"} {label}{!ok && fix ? ` (${fix})` : ""}</li>
+            ))}
+            {diag.lastError && <li className="text-bad">Last error: {diag.lastError}</li>}
+          </ul>
+          <button onClick={check} className="mt-1 min-h-11 rounded-xl border border-edge px-3 font-semibold">Check again</button>
+        </div>
+      )}
       {msg && <p className="text-[0.9rem] text-accent">{msg}</p>}
       {on && (
         <>

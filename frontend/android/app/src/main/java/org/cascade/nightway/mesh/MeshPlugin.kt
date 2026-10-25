@@ -1,7 +1,11 @@
 package org.cascade.nightway.mesh
 
 import android.Manifest
+import android.bluetooth.BluetoothManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.Build
 import com.getcapacitor.JSObject
 import com.getcapacitor.PermissionState
@@ -76,6 +80,30 @@ class MeshPlugin : Plugin(), BleMesh.Listener {
 
     @PluginMethod
     fun status(call: PluginCall) { call.resolve(statusObject()) }
+
+    /** Everything that commonly stops BLE relaying, for the Demo drawer's checklist. */
+    @PluginMethod
+    fun diagnose(call: PluginCall) {
+        val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        val locationOn = when {
+            lm == null -> false
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> lm.isLocationEnabled
+            else -> lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }
+        val perms = JSObject()
+        for (a in aliases()) perms.put(a, getPermissionState(a)?.toString() ?: "unknown")
+        call.resolve(JSObject()
+            .put("model", "${Build.MANUFACTURER} ${Build.MODEL}")
+            .put("android", Build.VERSION.SDK_INT)
+            .put("hasBle", context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE))
+            .put("bluetoothOn", adapter?.isEnabled == true)
+            .put("canAdvertise", adapter?.isMultipleAdvertisementSupported == true)
+            .put("locationOn", locationOn)
+            .put("permissions", perms)
+            .put("running", BleMesh.running)
+            .put("lastError", BleMesh.lastError))
+    }
 
     @PluginMethod
     fun broadcast(call: PluginCall) {

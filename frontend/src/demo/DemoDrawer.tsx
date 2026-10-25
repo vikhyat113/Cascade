@@ -4,6 +4,7 @@ import type { SimpleView } from "../types";
 import { ago, anyLive, demo, OFFICIAL, type LogLine, type SimState, type Source, type Status } from "./demoApi";
 import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl } from "../sos";
 import { BleSection } from "./BleSection";
+import { LocationCheck } from "./LocationCheck";
 import { fireTimerSoon } from "../sos/safetyTimer";
 import { MeshGraph } from "./MeshGraph";
 import { ScenariosTable } from "./ScenariosTable";
@@ -115,6 +116,7 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
         </Section>
 
         <Section id="data" title="5. Data check">
+          <LocationCheck />
           <div className="mb-2 flex flex-wrap gap-2 text-[0.9rem]">
             {(Object.keys(OFFICIAL) as Status[]).map((s) => (
               <span key={s} className="rounded-full border px-2 py-0.5" style={{ borderColor: OFFICIAL[s].color, color: OFFICIAL[s].color }}>
