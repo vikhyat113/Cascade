@@ -35,8 +35,24 @@ def get_config() -> dict:
     with open(path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     cfg["_data_dir"] = str((BACKEND_DIR / cfg.get("data_dir", "../data")).resolve())
+    poly_rel = cfg.get("area_polygon")
+    if poly_rel:
+        poly_path = (BACKEND_DIR / poly_rel).resolve()
+        if not poly_path.exists():
+            poly_path = (ROOT_DIR / poly_rel).resolve()
+        if not poly_path.exists():
+            raise FileNotFoundError(
+                f"Configured area_polygon file '{poly_rel}' was not found at {poly_path}. "
+                "Silent fallback to circle is not permitted when area_polygon is configured."
+            )
+        from .adapters.area import load_area
+        area = load_area(poly_path, buffer_m=cfg.get("area_buffer_m", 300))
+        cfg["center"] = area.centroid
+        cfg["radius_m"] = round(area.max_distance_to_vertex(), 1)
+        cfg["_area"] = area
     return cfg
 
 
 def data_dir() -> Path:
     return Path(get_config()["_data_dir"])
+

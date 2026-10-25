@@ -14,7 +14,7 @@ import sys
 
 import numpy as np
 
-from common import BACKEND, CFG, DATA, read_json, utc_now_iso, write_json
+from common import BACKEND, CFG, DATA, get_area, read_json, utc_now_iso, write_json
 
 sys.path.insert(0, str(BACKEND))
 from app.adapters.geo import LocalProjection  # noqa: E402
@@ -182,7 +182,12 @@ def main():
     proj = LocalProjection(CFG["center"]["lat"], CFG["center"]["lon"])
     G = RoadGraph(load_pack(DATA / "graph_drive.json.gz"), proj, "drive")
     pois = read_json(DATA / "pois.json")["pois"]
-    stops = dedupe_stops([p for p in pois if p["cat"] == "bus_stop"], proj)
+    area = get_area()
+    if area is not None:
+        bus_pois = [p for p in pois if p["cat"] == "bus_stop" and area.contains(p["lat"], p["lon"])]
+    else:
+        bus_pois = [p for p in pois if p["cat"] == "bus_stop"]
+    stops = dedupe_stops(bus_pois, proj)
     print(f"  {len(stops)} distinct bus stops")
     routes = build_bus_routes(G, stops, proj, pois) + build_metro(pois, proj)
     write_json(DATA / "transit_schedule.json", {

@@ -9,7 +9,7 @@ import sys
 
 import osmnx as ox
 
-from common import CFG, DATA, RAW, utc_now_iso, write_json
+from common import CFG, DATA, RAW, get_area, utc_now_iso, write_json
 
 
 def first(v):
@@ -40,7 +40,7 @@ def export_pack(G, directed: bool, path):
             "lat": [round(G.nodes[n]["y"], 6) for n in nodes],
             "lon": [round(G.nodes[n]["x"], 6) for n in nodes],
         },
-        "edges": {k: [] for k in ("u", "v", "len", "hw", "lit", "name", "speed", "geom")},
+        "edges": {k: [] for k in ("u", "v", "len", "hw", "lit", "name", "speed", "geom", "sidewalk", "footway", "surface")},
     }
     E = pack["edges"]
     for u, v, d in G.edges(data=True):
@@ -52,6 +52,12 @@ def export_pack(G, directed: bool, path):
         E["lit"].append(str(lit).lower() if lit is not None else None)
         E["name"].append(first(d.get("name")))
         E["speed"].append(round(float(d["speed_kph"]), 1) if "speed_kph" in d else parse_maxspeed(d.get("maxspeed")))
+        sw = first(d.get("sidewalk"))
+        E["sidewalk"].append(str(sw).lower() if sw is not None else None)
+        fw = first(d.get("footway"))
+        E["footway"].append(str(fw).lower() if fw is not None else None)
+        sf = first(d.get("surface"))
+        E["surface"].append(str(sf).lower() if sf is not None else None)
         if "geometry" in d:
             coords = [[round(x, 6), round(y, 6)] for x, y in d["geometry"].coords]
         else:
@@ -68,14 +74,20 @@ def download(network_type: str):
     ox.settings.http_user_agent = CFG["user_agent"]
     ox.settings.overpass_rate_limit = False
     ox.settings.requests_timeout = 300
-    ox.settings.useful_tags_way = list(set(ox.settings.useful_tags_way + ["lit", "sidewalk"]))
+    ox.settings.useful_tags_way = list(set(ox.settings.useful_tags_way + ["lit", "sidewalk", "footway", "surface"]))
+    area = get_area()
+    polygon = area.polygon if area is not None else None
     center = (CFG["center"]["lat"], CFG["center"]["lon"])
     last = None
     for url in CFG["overpass_urls"]:
         ox.settings.overpass_url = url.rsplit("/interpreter", 1)[0]
         try:
-            print(f"  downloading {network_type} graph via {ox.settings.overpass_url}")
-            return ox.graph_from_point(center, dist=CFG["radius_m"], network_type=network_type, simplify=True)
+            if polygon is not None:
+                print(f"  downloading {network_type} graph from polygon via {ox.settings.overpass_url}")
+                return ox.graph_from_polygon(polygon, network_type=network_type, simplify=True)
+            else:
+                print(f"  downloading {network_type} graph via {ox.settings.overpass_url}")
+                return ox.graph_from_point(center, dist=CFG["radius_m"], network_type=network_type, simplify=True)
         except Exception as e:
             last = e
             print(f"    failed: {e!r}")
