@@ -1,16 +1,20 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CONFIG } from "./config";
 import { useT, type CopyKey } from "./copy";
 import type { TripAsk } from "./engine/worker";
 import { MapCanvas } from "./components/MapCanvas";
 import { BackButton, Banner, Pill } from "./components/ui";
 import { call, listen } from "./lib/engine";
 import { useLive } from "./lib/live";
-import { lastTrip, loadPlace, myLocation, rememberTrip, savePlace } from "./lib/saved";
+import { lastTrip, loadFlag, loadPlace, myLocation, rememberTrip, saveFlag, savePlace } from "./lib/saved";
+import { alertContact } from "./sos";
+import { armTimer, disarmTimer, loadTimer, onTimerTapped, saveTimer, timerTimes } from "./sos/safetyTimer";
 import { Home, NEEDS } from "./screens/Home";
 import { OpenNow } from "./screens/OpenNow";
 import { Result } from "./screens/Result";
 import { Search } from "./screens/Search";
-import { HelpSheet, Trip } from "./screens/Trip";
+import { HelpSheet, SafetySheet } from "./screens/Help";
+import { Trip } from "./screens/Trip";
 import type { AppConfig, LatLon, Place, PlaceOnWay, SimpleView } from "./types";
 
 // Judges only: code-split, never in the first download (spec §11).
@@ -51,6 +55,8 @@ function Main() {
   const [sheetH, setSheetH] = useState(380);
   const [bannerId, setBannerId] = useState<string | null>(null);
   const [demoOpen, setDemoOpen] = useState(false);
+  const [lateAlert, setLateAlertState] = useState(false);
+  const [safety, setSafety] = useState<"ask" | "late" | null>(null);
   const seen = useRef(new Set<string>());
   const ask = useRef<TripAsk | null>(null);
   const conn = useLive(cfg?.center ?? null);
@@ -67,6 +73,7 @@ function Main() {
         setWork(await loadPlace("work", c.ui_defaults));
         setBy(c.ui_defaults.deadline);
         setFrom(await myLocation(c.ui_defaults, c.center, c.radius_m));
+        setLateAlertState(await loadFlag("lateAlert"));
         const saved = await lastTrip();
         if (!saved || stop) return;
         let v = await call("plan", saved.ask);
@@ -92,6 +99,38 @@ function Main() {
   // ---- live updates: the engine pushes a fresh view on every tick; words follow the language ----------
   useEffect(() => listen((m) => { if (m.type === "view") setView(m.view); }), []);
   useEffect(() => { call("setLang", lang).catch(() => {}); }, [lang]);
+
+  // ---- safety timer: ask "Are you home?", then alert the contact if there is no answer ----------------
+  const here = (): Place | null => (view?.trip?.position ? { lat: view.trip.position[0], lon: view.trip.position[1], name: "" } : from);
+  const hereRef = useRef(here);
+  hereRef.current = here;
+  useEffect(() => {
+    const check = async () => {
+      const tm = await loadTimer();
+      if (!tm || tm.answered) return;
+      const now = Date.now();
+      if (now >= tm.alertAt && !tm.alerted) {
+        const at = hereRef.current() ?? { lat: tm.lat, lon: tm.lon };
+        await saveTimer({ ...tm, alerted: true });
+        alertContact(at).catch(() => {});
+        setSafety("late");
+      } else if (now >= tm.askAt) {
+        setSafety((s) => s ?? (tm.alerted ? "late" : "ask"));
+      }
+    };
+    check();
+    const id = window.setInterval(check, CONFIG.safetyTimer.checkMs);
+    const off = onTimerTapped(() => { check(); });
+    return () => { window.clearInterval(id); off(); };
+  }, []);
+  const setLateAlert = (on: boolean) => { setLateAlertState(on); saveFlag("lateAlert", on); };
+  const imHome = () => { disarmTimer(); setSafety(null); };
+  const safetyHelp = async () => {
+    const tm = await loadTimer();
+    if (tm) await saveTimer({ ...tm, answered: true });
+    setSafety(null);
+    setHelpAt(here());
+  };
 
   // ---- one banner at a time, each shown once ---------------------------------------------------
   useEffect(() => {
@@ -139,6 +178,10 @@ function Main() {
       const v = await call("choose", shown.plan_id);
       if (v) { setView(v); setShownId(v.current_option_id || shown.id); }
       if (ask.current) rememberTrip({ ask: ask.current, option: v?.current_option_id || shown.id, started: true });
+      if (lateAlert && from) {
+        const tm = await call("timing");
+        if (tm.deadline) await armTimer({ ...timerTimes(tm.deadline, tm.now, tm.speed), lat: from.lat, lon: from.lon }, { title: t("line.areYouHome"), body: t("line.tapToAnswer") });
+      }
     } catch { /* carry on with what we have */ }
     setStarting(false);
     setScreen("trip");
@@ -146,6 +189,8 @@ function Main() {
 
   const endTrip = () => {
     call("endTrip").catch(() => {});
+    disarmTimer();
+    setSafety(null);
     rememberTrip(null);
     ask.current = null;
     setView(null);
@@ -250,18 +295,19 @@ function Main() {
         </div>
       )}
       {screen === "result" && shown && (
-        <Result options={options} shown={shown} onTab={setShownId} onBackup={onBackup} onStart={start} starting={starting}
+        <Result options={options} shown={shown} onTab={setShownId} onBackup={onBackup} onStart={start} starting={starting} lateAlert={lateAlert} setLateAlert={setLateAlert}
           onBack={() => setScreen("home")} showPlaces={showPlaces} setShowPlaces={setShowPlaces} onHeight={setSheetH} {...demo} />
       )}
       {screen === "trip" && current && (
         <Trip option={current} trip={view?.trip ?? null} onEnd={endTrip} onBackup={onBackup} onHeight={setSheetH} {...demo}
-          onHelp={() => setHelpAt(view?.trip?.position ? { lat: view.trip.position[0], lon: view.trip.position[1], name: "" } : from)} />
+          onHelp={() => setHelpAt(here())} />
       )}
       {screen === "opennow" && need && (
         <OpenNow title={need.title} places={need.places} empty={need.empty} onBack={() => setScreen("home")}
           onPick={goTo} onHeight={setSheetH} />
       )}
       {helpAt && <HelpSheet at={helpAt} onClose={() => setHelpAt(null)} onGo={goTo} />}
+      {safety && !helpAt && from && <SafetySheet at={here() ?? from} late={safety === "late"} onHome={imHome} onHelp={safetyHelp} />}
 
       <Suspense fallback={null}>
         {demoOpen && <DemoDrawer view={view} onClose={() => setDemoOpen(false)} />}

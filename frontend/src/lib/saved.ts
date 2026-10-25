@@ -22,6 +22,9 @@ export async function loadPlace(slot: Slot, defaults: UiDefaults | null): Promis
 }
 export function savePlace(slot: Slot, p: Place): void { write(`nw.${slot}`, { lat: p.lat, lon: p.lon, name: p.name }); }
 
+export async function loadFlag(key: string): Promise<boolean> { return (await read<boolean>(`nw.${key}`)) === true; }
+export function saveFlag(key: string, on: boolean): void { write(`nw.${key}`, on); }
+
 export async function loadLang(): Promise<Lang> { return (await read<Lang>("nw.lang")) === "hi" ? "hi" : "en"; }
 export function saveLang(l: Lang): void { write("nw.lang", l); }
 

@@ -96,6 +96,7 @@ const handlers = {
     engine.replanner.tickAll();
     push(true);
   },
+  timing() { const c = engine.clock as AppClock; return { deadline: engine.active?.planset?.deadline ?? null, now: c.now(), speed: c.paused ? 0 : c.speed }; },
   clock() { const c = engine.clock as AppClock; return { now: c.now(), speed: c.speed, paused: c.paused, now_text: engine.world.city.clock(c.now()) ?? "", rain: engine.state.truth.rain }; },
   sources() { return Object.fromEntries(Object.entries(engine.state.sources).map(([k, v]) => [k, v.enabled])); },
   trust() { return engine.trust(); },

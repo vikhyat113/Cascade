@@ -1,0 +1,9 @@
+{
+  "name": "nightway-dispatch",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Simulated police / hospital / contact dispatch desks for the NightWay demo",
+  "type": "module",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "4.21.2" }
+}

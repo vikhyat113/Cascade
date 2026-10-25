@@ -19,10 +19,22 @@
 - Home / Work, language and the last trip saved with Capacitor Preferences; a started trip resumes after a restart. GPS via Capacitor Geolocation (location permission added to the manifest).
 - Colours come only from `theme.ts` (CSS variables). `scripts/build-apk.sh` fixed for Git Bash on Windows (`sh ./gradlew`, finds the per-user JDK/SDK).
 - Verified in headless Chrome at 360x740: boot to Home 0.4 s, plan 0.3 s, reload resumes the trip, offline line shows, Open now lists places, no console errors.
-- **Unverified on the real phone yet**: worker + location prompt inside the Android WebView (APK copied to the phone's Download folder).
+- Checked on the phone (POCO X6 Pro) by the user: installs, opens, plans.
+
+## Phase 4: Help, dispatch, mesh, safety timer (done, tag phase-4)
+- Help: **Call 112**, three big buttons (I'm in danger / I need a doctor / Not sure), **Text my contact** (SMS with map link). Status: Sending… → Passed on → Help is aware, or Not sure.
+- Ladder (`src/sos/ladder.ts`): direct to the dispatch server if reachable, else simulated mesh; next desk after 20 s without acknowledgement.
+- `server/`: Node + Express dispatch server, port 8787, dashboard with Police / Hospital / Contact tabs, live list, Acknowledge. **Simulated** (stated in its page, README and Demo drawer).
+- `SimulatedMeshTransport`: 6 virtual phones, gossip, dedupe, hop limit, store-and-forward gateway, acks back. Demo drawer: animated graph, "Help via mesh", gateway signal, dispatch URL + test, "Safety timer: ask now".
+- Safety timer with local notification (`@capacitor/local-notifications`).
+- Tests: 55 in total (8 new: ladder, mesh, timer times). Browser run at 360 px: direct help → ack → "Help is aware"; mesh help (3 hops) → ack; timer → Contact desk alert + SMS offered; no console errors.
+- **Unverified on the phone**: notification permission prompt, SMS/tel intents, reaching the laptop over Wi-Fi (Windows firewall must allow Node).
 
 ## Commands
 - Tests: `cd frontend && npm test` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 
+## Commands (dispatch)
+- `cd server && npm install && npm start`, then put the printed Wi-Fi address in Demo → 8. Dispatch server.
+
 ## Next
-- Phase 4: Help (3 buttons, Call 112, Text my contact), escalation ladder, `server/` dispatch server + dashboard, safety timer, simulated mesh.
+- Phase 5: Demo drawer to spec (order, Set to 2:15 AM, speed), scenarios table, change log.

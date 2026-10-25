@@ -47,8 +47,9 @@ export function WarningLine({ option, onBackup }: { option: Option; onBackup: (i
   );
 }
 
-export function Result({ options, shown, onTab, onBackup, onStart, onBack, showPlaces, setShowPlaces, starting, showDemo, onDemo, onHeight }: {
+export function Result({ options, shown, onTab, onBackup, onStart, onBack, showPlaces, setShowPlaces, starting, lateAlert, setLateAlert, showDemo, onDemo, onHeight }: {
   options: Option[]; shown: Option; onTab: (id: string) => void; onBackup: (id: string) => void; onStart: () => void;
+  lateAlert: boolean; setLateAlert: (v: boolean) => void;
   onBack: () => void; showPlaces: boolean; setShowPlaces: (v: boolean) => void; starting: boolean;
   showDemo: boolean; onDemo: () => void; onHeight: (h: number) => void;
 }) {
@@ -88,6 +89,13 @@ export function Result({ options, shown, onTab, onBackup, onStart, onBack, showP
       {shown.same_text && <p className="mt-2 text-[0.95rem] text-soft">{shown.same_text}</p>}
 
       <WarningLine option={shown} onBackup={onBackup} />
+
+      {shown.timing !== "none" && (
+        <label className="mt-3 flex min-h-12 cursor-pointer items-center justify-between gap-3 rounded-2xl bg-raised px-4">
+          <span className="font-semibold">{t("line.tellIfLate")}</span>
+          <input type="checkbox" role="switch" checked={lateAlert} onChange={(e) => setLateAlert(e.target.checked)} className="h-6 w-6 accent-accent" />
+        </label>
+      )}
 
       <div className="mt-4"><BigButton onClick={onStart} disabled={starting}>{t("label.start")}</BigButton></div>
 

@@ -31,3 +31,5 @@ The new spec says **the phone does the thinking**: engine in TypeScript, data bu
 * **Capacitor 6.2** (not 7): Capacitor 7 needs JDK 21; the spec and this machine use JDK 17. Capacitor 6.2 = Android Gradle Plugin 8.2, compileSdk 34, minSdk 22.
 * React 18 + Vite 6 + TypeScript + Tailwind v4 + Leaflet (canvas renderer) + Vitest: already in `frontend/`.
 * Demo area: the repo already defines it (`backend/config.yaml`: Noida, center 28.5705, 77.3229, radius 4 km), so the "FILL THESE 3 LINES" block is not needed. The spec's 2.5 km default would cut off the demo persona's home in Sector 12 (3 km from the centre), so the bundled graph keeps the repo's 4 km radius. It stays well under the 8 MB limit; see PROGRESS.md for sizes.
+
+**Phase 4:** the old Help sheet (nearest hospital/police + share link, `screens/Trip.tsx`) was replaced by `screens/Help.tsx` (three choices, escalation ladder, Text my contact); the share-link feature needed the Python server and is dropped in the APK. The previous version stays in git history (tag `phase-3`).

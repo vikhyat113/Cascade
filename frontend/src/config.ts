@@ -82,8 +82,25 @@ export const CONFIG = {
     weatherProbeOkS: 1800,    // pill says Live if the last probe is newer than this
   },
   dispatch: {
-    defaultUrl: "http://localhost:8787",
+    // the phone reaches the laptop over Wi-Fi: set VITE_DISPATCH_URL at build time or in the Demo drawer
+    defaultUrl: import.meta.env.VITE_DISPATCH_URL || "http://localhost:8787",
     ackTimeoutS: 20,          // demo: short; escalate to the next helper after this
+    reachTimeoutMs: 2500,     // "can the phone reach the server?" check
+    sendTimeoutMs: 5000,
+    pollMs: 2000,             // ask the server for an acknowledgement this often
+    // who is asked first, then next, when nobody acknowledges
+    ladder: { danger: ["police", "hospital"], medical: ["hospital", "police"], unsure: ["police", "hospital"] } as Record<string, ("police" | "hospital")[]>,
+  },
+  mesh: {
+    nodes: 6,                 // virtual phones in the simulated mesh (node 0 = this phone, last = gateway)
+    ttl: 5,                   // hop limit
+    hopMs: [300, 900] as [number, number],   // random relay delay per hop
+    gatewayRetryMs: 3000,     // store-and-forward: gateway retries the server this often
+  },
+  safetyTimer: {
+    afterDeadlineMin: 10,     // "Are you home?" this long after "Be there by"
+    answerWithinMin: 5,       // no answer by then: alert the contact (simulated) and offer the text
+    checkMs: 5000,
   },
 };
 

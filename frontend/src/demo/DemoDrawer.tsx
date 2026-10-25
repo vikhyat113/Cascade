@@ -1,6 +1,10 @@
+import { CONFIG } from "../config";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { SimpleView } from "../types";
 import { ago, anyLive, demo, OFFICIAL, type LogLine, type SimState, type Source, type Status } from "./demoApi";
+import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl } from "../sos";
+import { fireTimerSoon } from "../sos/safetyTimer";
+import { MeshGraph } from "./MeshGraph";
 import { ScenariosTable } from "./ScenariosTable";
 
 /** Hidden Demo drawer (UI_SPEC §5). For judges: technical words are allowed here. The main
@@ -12,6 +16,9 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
   const [time, setTime] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({ break: true, happen: true, time: true });
   const [log, setLog] = useState<LogLine[]>([]);
+  const [url, setUrl] = useState(getDispatchUrl());
+  const [, bump] = useState(0);
+  const flip = (f: () => void) => { f(); bump((n) => n + 1); };
 
   const refresh = useCallback(() => {
     demo.sim().then(setSim).catch(() => {});
@@ -133,6 +140,43 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
               </li>
             ))}
           </ol>
+        </Section>
+
+        <Section id="mesh" title="7. Mesh (simulated)">
+          <MeshGraph />
+          <p className="mt-2 text-[0.9rem] text-soft">
+            Simulated: {mesh.nodes.length} virtual phones, gossip relay, dedupe by id, hop limit {CONFIG.mesh.ttl},
+            store-and-forward at the gateway. Relayed {mesh.stats().relayed} · waiting at gateway {mesh.stats().waiting}
+            {mesh.stats().lastPacketAt ? ` · last packet ${ago((Date.now() - mesh.stats().lastPacketAt!) / 1000)} ago` : ""}. Real Bluetooth: off (Phase 7).
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button onClick={() => flip(() => { demoFlags.forceMesh = !demoFlags.forceMesh; })} aria-pressed={demoFlags.forceMesh}
+              className={`min-h-12 rounded-2xl border px-3 font-semibold ${demoFlags.forceMesh ? "border-accent bg-accent/15" : "border-edge bg-raised"}`}>
+              Help via mesh: {demoFlags.forceMesh ? "ON" : "off"}
+            </button>
+            <button onClick={() => flip(() => { mesh.gatewaySignal = !mesh.gatewaySignal; })} aria-pressed={mesh.gatewaySignal}
+              className={`min-h-12 rounded-2xl border px-3 font-semibold ${mesh.gatewaySignal ? "border-good/60 bg-good/10" : "border-bad/60 bg-bad/10"}`}>
+              Gateway signal: {mesh.gatewaySignal ? "ON" : "OFF"}
+            </button>
+          </div>
+          <p className="mt-1 text-[0.85rem] text-soft">“Help via mesh” pretends this phone can’t reach the server, so Help goes phone to phone.</p>
+        </Section>
+
+        <Section id="dispatch" title="8. Dispatch server (simulated police / hospital)">
+          <p className="mb-2 text-[0.9rem] text-soft">Run <code>cd server && npm start</code> on the laptop; use the Wi-Fi address it prints. Not real emergency services.</p>
+          <div className="flex gap-2">
+            <input value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Dispatch server URL" inputMode="url"
+              className="min-h-12 min-w-0 flex-1 rounded-xl border border-edge bg-raised px-3 text-ink" />
+            <Act label="Save + test" onClick={() => act(async () => {
+              setDispatchUrl(url);
+              if (!(await dispatch.reachable())) throw new Error(`can't reach ${getDispatchUrl()}`);
+            }, `Dispatch server reachable at ${url}`)} />
+          </div>
+          <div className="mt-2">
+            <Act label="Safety timer: ask now" onClick={() => act(async () => {
+              if (!(await fireTimerSoon())) throw new Error("no timer: switch on “Tell my contact if I’m late”, then Start");
+            }, "Asking “Are you home?” now; alert in 20 s if no answer")} />
+          </div>
         </Section>
       </div>
     </div>
