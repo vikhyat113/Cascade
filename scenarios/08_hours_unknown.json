@@ -1,0 +1,12 @@
+{
+  "id": "hours_unknown",
+  "name": "8. Service listed but hours unknown",
+  "description": "Pharmacies exist in OSM but none lists opening hours. Need-now must show them as UNKNOWN (never 'open'), rank confirmed-open options first, and stay honest when the hours source is lost entirely.",
+  "seed": 42,
+  "request": {"persona": "call_centre"},
+  "events": [],
+  "end": "02:12",
+  "checks": [{"type": "need_now", "kind": "pharmacy"}, {"type": "need_now", "kind": "atm"},
+             {"type": "need_now", "kind": "atm", "disable": "osm_hours"}],
+  "expect": {"never_status_unknown_as_value": true, "always_has_plan": true}
+}

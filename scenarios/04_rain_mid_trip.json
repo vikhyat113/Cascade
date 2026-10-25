@@ -1,0 +1,9 @@
+{
+  "id": "rain_mid_trip",
+  "name": "4. Heavy rain starts mid-trip",
+  "description": "Heavy rain at 02:18 (forecast said dry). Live weather observations pick it up, walking slows, exposure rises, waterlogging closes low spots ~10 min later.",
+  "seed": 42,
+  "request": {"persona": "call_centre", "prefs": {"modes": ["walk", "bus"], "max_walk_m": 4000}},
+  "events": [{"t": "02:18", "type": "rain_start", "params": {"intensity": "heavy"}}],
+  "expect": {"never_status_unknown_as_value": true, "always_has_plan": true, "safety_drops": true, "plan_b_offered": true}
+}

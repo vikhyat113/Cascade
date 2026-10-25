@@ -1,0 +1,9 @@
+{
+  "id": "bus_cancelled",
+  "name": "2. Bus cancelled",
+  "description": "Same trip without cabs. The night bus the plan relies on is cancelled at 02:12; realtime reports it and the plan must switch, with Plan B offered.",
+  "seed": 42,
+  "request": {"persona": "call_centre", "prefs": {"modes": ["walk", "bus"], "max_walk_m": 4000}},
+  "events": [{"t": "02:12", "type": "bus_cancelled", "params": {}}],
+  "expect": {"never_status_unknown_as_value": true, "always_has_plan": true, "plan_changed": true, "plan_b_offered": true, "still_feasible": "maybe"}
+}

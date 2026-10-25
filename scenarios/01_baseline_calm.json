@@ -1,0 +1,9 @@
+{
+  "id": "baseline_calm",
+  "name": "1. Baseline calm night",
+  "description": "Call-centre agent finishes at 02:15, home in Sector 12 by 03:00. All feeds healthy, nothing happens. The plan should stay stable (hysteresis) and valid.",
+  "seed": 42,
+  "request": {"persona": "call_centre"},
+  "events": [],
+  "expect": {"never_status_unknown_as_value": true, "always_has_plan": true, "still_feasible": "yes", "plan_changed": false}
+}

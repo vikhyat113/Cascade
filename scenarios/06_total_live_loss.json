@@ -1,0 +1,10 @@
+{
+  "id": "total_live_loss",
+  "name": "6. Total live-data loss",
+  "description": "Every live feed dies at 02:18. The engine must keep producing a plan from cache, schedules and priors, with confidence visibly dropping and statuses decaying to OUTDATED/UNKNOWN.",
+  "seed": 42,
+  "request": {"persona": "call_centre"},
+  "events": [{"t": "02:18", "type": "source_outage", "params": {"source": "all_live"}}],
+  "end": "03:10",
+  "expect": {"never_status_unknown_as_value": true, "always_has_plan": true, "confidence_drops": true, "min_status": "OUTDATED"}
+}

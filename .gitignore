@@ -1,0 +1,26 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# node
+node_modules/
+frontend/dist/
+
+# large / regenerable data (compact packs in data/ are committed so the app runs offline)
+data/raw/
+data/*.graphml
+data/runtime/
+
+# editor / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# backup demo video (regenerate with scripts/record_demo.py)
+docs/demo/*.webm

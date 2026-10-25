@@ -1,0 +1,3 @@
+# Only needed to (re)download city data with scripts/fetch_all.py
+-r requirements.txt
+osmnx>=2.0

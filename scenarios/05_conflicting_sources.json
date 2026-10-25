@@ -1,0 +1,9 @@
+{
+  "id": "conflicting_sources",
+  "name": "5. Conflicting sources (timetable vs realtime)",
+  "description": "The timetable says the night bus is on time; realtime says it is 15 minutes late. The newer observation wins, the timetable is flagged OUTDATED, and the conflict is shown.",
+  "seed": 42,
+  "request": {"persona": "call_centre", "prefs": {"modes": ["walk", "bus"], "max_walk_m": 4000}},
+  "events": [{"t": "02:06", "type": "schedule_conflict", "params": {"delay_s": 900}}],
+  "expect": {"never_status_unknown_as_value": true, "always_has_plan": true, "conflict_flagged": true}
+}

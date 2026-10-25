@@ -1,0 +1,142 @@
+# ---- Demo area (change these three lines + re-run scripts/fetch_all.py to switch city) ----
+city_name: "Noida (Sector 18 area)"
+center: {lat: 28.5705, lon: 77.3229}
+radius_m: 4000
+timezone: "Asia/Kolkata"
+
+seed: 42
+data_dir: "../data"          # relative to backend/
+
+overpass_urls:               # tried in order; results are cached, never called during the demo
+  - "https://overpass-api.de/api/interpreter"
+  - "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+  - "https://overpass.kumi.systems/api/interpreter"
+user_agent: "NightWay-hackathon/0.1 (CASCADE26 night-time decision engine demo)"
+
+# ---- Simulated clock ----
+sim:
+  night_date: auto           # YYYY-MM-DD the night starts on, or auto = tonight
+  start_time: "02:00"        # where the sim clock starts (local time)
+  speed: 10                  # simulated seconds per real second
+  start_paused: true         # clock waits at start_time until the first trip is planned
+  tick_s: 2.0                # real seconds between live-loop ticks
+  warmup_s: 300              # feeds run this many sim seconds before the first plan
+
+# ---- Freshness engine ----
+freshness:
+  known_min_reliability: 0.7
+  outdated_factor: 3         # observed: ttl < age <= 3*ttl -> PROBABLE, beyond -> OUTDATED
+  unusable_factor: 10        # observed: age > 10*ttl -> UNKNOWN (too old to use at all)
+  coverage_threshold: 0.3    # share of a route that drags a category down to a weaker status
+  outdated_discount: 0.5
+  decay_scale: 3             # confidence = reliability * exp(-age / (decay_scale * ttl)); 1 = literal exp(-age/ttl)
+  kind_caps: {observed: 1.0, scheduled: 0.8, inferred: 0.65, prior: 0.4}
+
+# ---- Data sources (ttl in sim seconds) ----
+sources:
+  osm_map:          {label: "OpenStreetMap streets & places", kind: observed,  ttl_s: 31536000, reliability: 0.85, synthetic: false, live: false}
+  osm_hours:        {label: "OSM opening hours",              kind: observed,  ttl_s: 31536000, reliability: 0.8,  synthetic: false, live: false}
+  weather_forecast: {label: "Open-Meteo forecast (cached)",   kind: inferred,  ttl_s: 172800,   reliability: 0.75, synthetic: false, live: false}
+  weather_live:     {label: "Weather observations",           kind: observed,  ttl_s: 900,      reliability: 0.8,  synthetic: true,  live: true, dropout: 0.03, max_delay_s: 60}
+  traffic_live:     {label: "Live traffic speeds",            kind: observed,  ttl_s: 120,      reliability: 0.85, synthetic: true,  live: true, dropout: 0.05, max_delay_s: 30, coverage: 0.85}
+  transit_schedule: {label: "Night bus & metro timetable",    kind: scheduled, ttl_s: 2592000,  reliability: 0.7,  synthetic: true,  live: false}
+  transit_realtime: {label: "Bus realtime positions",         kind: observed,  ttl_s: 120,      reliability: 0.9,  synthetic: true,  live: true, dropout: 0.05, max_delay_s: 20, coverage: 0.9}
+  closures_feed:    {label: "Road closures & waterlogging",   kind: observed,  ttl_s: 600,      reliability: 0.8,  synthetic: true,  live: true, dropout: 0.03, max_delay_s: 30}
+  cab_availability: {label: "Cab / auto availability",        kind: observed,  ttl_s: 300,      reliability: 0.6,  synthetic: true,  live: true, dropout: 0.05, max_delay_s: 30}
+  incident_reports: {label: "Live incident reports",          kind: observed,  ttl_s: 600,      reliability: 0.6,  synthetic: true,  live: true, dropout: 0.05, max_delay_s: 60}
+  incident_history: {label: "Incident history (90 nights)",   kind: inferred,  ttl_s: 31536000, reliability: 0.6,  synthetic: true,  live: false}
+
+# ---- Risk model ----
+risk:
+  weights: {lighting: 0.24, incident: 0.24, isolation: 0.2, traffic: 0.1, weather: 0.1, emergency: 0.12}
+  grid_m: 250                # incident / heatmap grid
+  traffic_cell_m: 500
+  cab_zone_m: 1000
+  vehicle_factor: 0.35       # risk multiplier for lighting/isolation/incident while inside a cab
+  transit_ride_factor: 0.3
+  safe_haven_wait_risk: 0.08
+  night_hours: [19, 6]       # darkness from 19:00 to 06:00
+
+# ---- Planner ----
+planner:
+  lambdas: [0, 0.5, 1, 2, 4]
+  risk_cost_s_per_m: 0.8     # risk 1.0 on an edge doubles its cost at lambda=1
+  walk_speed_mps: {best: 1.45, expected: 1.25, worst: 1.0}
+  max_walk_m: 2500
+  max_access_walk_m: 1200    # walking to/from a stop
+  dedupe_overlap: 0.85
+  hysteresis_points: 5
+  hysteresis_eta_s: 300
+  eta_change_log_s: 180
+  stop_buffer_s: 60
+  safe_haven_radius_m: 200
+
+# ---- Simple UI (UI_SPEC §4): how worst-case safety maps to Safe / OK / Be careful ----
+# UI_SPEC suggests 75 / 50. In this city the worst-case scores of real options sit
+# between ~40 (long dark walk) and ~72 (cab), so 75 would never say "Safe".
+# Calibrated: cab on main roads -> Safe, night bus -> OK, long unlit walk -> Be careful.
+presentation:
+  safe_min: 66
+  ok_min: 55
+  banner_max_age_s: 600       # a plan change older than this is not shown as a banner
+  ui_defaults:                # demo convenience: what Home / Work / start / "Be there by" are pre-filled with
+    persona: call_centre
+    deadline: "03:00"
+
+# ---- Night-time behaviour of cabs (prior model, minutes) ----
+cab:
+  base_wait_min: {"22": 5, "23": 6, "0": 7, "1": 9, "2": 11, "3": 12, "4": 10, "5": 7}
+  pickup_walk_m: 60
+
+# ---- Persona presets: origin/home are place-name queries resolved against OSM at startup ----
+personas:
+  - id: call_centre
+    label: "Call-centre agent"
+    origin: "Noida Sector 18"
+    home: "Police Station Sector-12"
+    home_label: "Home (Sector 12)"
+    finish_time: "02:15"
+    deadline: "03:00"
+    modes: [walk, bus, cab]
+    risk_weight: 0.75
+    max_walk_m: 1500
+  - id: nurse
+    label: "Nurse (night shift)"
+    origin: "Kailash Hospital & Heart Institute"
+    home: "New Ashok Nagar"
+    home_label: "Home (New Ashok Nagar)"
+    finish_time: "02:00"
+    deadline: "02:50"
+    modes: [walk, bus, cab]
+    risk_weight: 0.8
+    max_walk_m: 1200
+  - id: security_guard
+    label: "Security guard"
+    origin: "Noida City Centre"
+    home: "Chhalera"
+    home_label: "Home (Chhalera)"
+    finish_time: "03:00"
+    deadline: "03:50"
+    modes: [walk, bus, cab]
+    risk_weight: 0.6
+    max_walk_m: 3000
+  - id: delivery_worker
+    label: "Delivery worker"
+    origin: "Noida Sector 16"
+    home: "Nithari"
+    home_label: "Home (Nithari)"
+    finish_time: "02:30"
+    deadline: "03:15"
+    modes: [walk, bus]
+    risk_weight: 0.5
+    max_walk_m: 3500
+  - id: factory_worker
+    label: "Factory worker"
+    origin: "Okhla Vihar"
+    home: "Sadarpur"
+    home_label: "Home (Sadarpur)"
+    finish_time: "02:00"
+    deadline: "03:00"
+    modes: [walk, bus, cab]
+    risk_weight: 0.7
+    max_walk_m: 2000

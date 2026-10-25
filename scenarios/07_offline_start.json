@@ -1,0 +1,11 @@
+{
+  "id": "offline_start",
+  "name": "7. Fully offline start",
+  "description": "The app starts with no live feed ever received and no weather cache. Plans come only from the cached map, timetable and priors; weather and closures are UNKNOWN (never assumed).",
+  "seed": 42,
+  "request": {"persona": "call_centre"},
+  "offline_start": true,
+  "unavailable": ["weather_forecast"],
+  "events": [],
+  "expect": {"never_status_unknown_as_value": true, "always_has_plan": true, "min_status": "UNKNOWN", "status_reaches": {"weather": "UNKNOWN"}}
+}

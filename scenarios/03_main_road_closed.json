@@ -1,0 +1,9 @@
+{
+  "id": "main_road_closed",
+  "name": "3. Main road closed",
+  "description": "A police barricade closes the main road the recommended route uses (02:16). The closures feed reports it and the plan re-routes.",
+  "seed": 42,
+  "request": {"persona": "call_centre", "prefs": {"modes": ["walk", "cab"]}},
+  "events": [{"t": "02:16", "type": "road_closure", "params": {"edge_selector": "main_road_nearest_route", "reason": "police barricade"}}],
+  "expect": {"never_status_unknown_as_value": true, "always_has_plan": true, "plan_changed": true}
+}
