@@ -1,6 +1,6 @@
 # MASTER PROMPT — Simple UI for "NightWay" (replaces the frontend parts of SPEC.md)
 
-> Give this file to Claude Code together with `SPEC.md`. Say: "Read SPEC.md and this file. Where they disagree about the user interface, THIS FILE WINS. The backend logic in SPEC.md stays. If a frontend already exists, refactor it. If not, build it."
+> Use this file together with `SPEC.md`. Say: "Read SPEC.md and this file. Where they disagree about the user interface, THIS FILE WINS. The backend logic in SPEC.md stays. If a frontend already exists, refactor it. If not, build it."
 
 ---
 

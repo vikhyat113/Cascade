@@ -1,6 +1,6 @@
 # ONE PROMPT: NightWay Android app (existing repo, full build, add-on mode)
 
-> How to use: open a terminal in your clone of `git@github.com:vikhyat113/Cascade.git`, save this file in the repo root as `SPEC.md`, start Claude Code, and say:
+> How to use: open a terminal in your clone of `git@github.com:vikhyat113/Cascade.git`, save this file in the repo root as `SPEC.md`, and say:
 > **"Read SPEC.md completely and execute it from Phase 0. Don't stop between phases unless SPEC.md tells you to ask me. Keep PROGRESS.md updated."**
 > This file replaces all earlier prompts.
 

@@ -1,6 +1,6 @@
 # MASTER PROMPT — "NightWay" (placeholder name): Night-Time Decision Engine
 
-> Paste this whole file into Claude Code as the first message, or save it as `SPEC.md` / `CLAUDE.md` in the repo root and say: "Read SPEC.md fully and build it, following the build order."
+> Paste this whole file as the first message, or save it as `SPEC.md` in the repo root and say: "Read SPEC.md fully and build it, following the build order."
 
 ---
 
