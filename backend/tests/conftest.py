@@ -99,7 +99,7 @@ def tiny_data(tmp_path_factory):
 def tiny_cfg():
     cfg = copy.deepcopy(get_config())
     cfg.update({"center": {"lat": LAT0, "lon": LON0}, "radius_m": 700, "city_name": "Tiny test city",
-                "personas": [], "seed": 7})
+                "personas": [], "seed": 7, "area_polygon": None})
     cfg["sim"] = {**cfg["sim"], "night_date": "2026-10-25", "start_time": "02:00", "warmup_s": 300}
     return cfg
 

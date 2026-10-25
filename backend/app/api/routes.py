@@ -6,8 +6,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -54,13 +55,111 @@ def health():
 def config():
     e = eng()
     st = e.static
+    import math
     import os
-    return {"city_name": st.cfg["city_name"], "center": {"lat": st.center[0], "lon": st.center[1]},
-            "radius_m": st.radius, "timezone": str(st.tz), "night": st.night.isoformat(),
-            "personas": st.personas, "weights": st.risk_cfg["weights"], "llm_enabled": bool(os.environ.get("GROQ_API_KEY")),
-            "credits": ["© OpenStreetMap contributors (ODbL)", "Weather data by Open-Meteo.com (CC BY 4.0)"],
-            "synthetic_sources": [k for k, v in st.source_cfg.items() if v["synthetic"]],
-            "needs": list(needs.NEEDS), "ui_defaults": ui_defaults(e)}
+    res = {"city_name": st.cfg["city_name"], "center": {"lat": st.center[0], "lon": st.center[1]},
+           "radius_m": st.radius, "timezone": str(st.tz), "night": st.night.isoformat(),
+           "personas": st.personas, "weights": st.risk_cfg["weights"], "llm_enabled": bool(os.environ.get("GROQ_API_KEY")),
+           "credits": ["© OpenStreetMap contributors (ODbL)", "Weather data by Open-Meteo.com (CC BY 4.0)"],
+           "synthetic_sources": [k for k, v in st.source_cfg.items() if v["synthetic"]],
+           "needs": list(needs.NEEDS), "ui_defaults": ui_defaults(e)}
+    if st.area is not None:
+        res["area_mode"] = "polygon"
+        res["area_source"] = f"{st.area.source_path} ({st.area.source_mtime})"
+        res["vertex_count"] = len(st.area.polygon.exterior.coords)
+        res["area_km2"] = round(st.area.area_km2(), 2)
+        res["bbox"] = st.area.bbox
+        res["placeholder_suspect"] = bool(st.area.placeholder_suspect)
+        res["polygon"] = st.area.geojson_geometry
+    else:
+        deg_lat = st.radius / 110540.0
+        deg_lon = st.radius / (111320.0 * math.cos(math.radians(st.center[0])))
+        circ_area = math.pi * (st.radius / 1000.0) ** 2
+        res["area_mode"] = "circle_fallback"
+        res["area_source"] = "config.yaml (center + radius_m)"
+        res["vertex_count"] = 0
+        res["area_km2"] = round(circ_area, 2)
+        res["bbox"] = [round(st.center[1] - deg_lon, 6), round(st.center[0] - deg_lat, 6),
+                       round(st.center[1] + deg_lon, 6), round(st.center[0] + deg_lat, 6)]
+        res["placeholder_suspect"] = False
+        res["polygon"] = None
+    return res
+
+
+@router.get("/area/diagnostics")
+def area_diagnostics():
+    e = eng()
+    st = e.static
+    cfg_data = config()
+
+    walk_n, walk_m = int(st.walk.n), int(st.walk.m)
+    drive_n, drive_m = int(st.drive.n), int(st.drive.m)
+
+    if st.area is not None:
+        walk_inside = sum(1 for la, lo in zip(st.walk.lat, st.walk.lon) if st.area.contains_buffered(la, lo))
+        drive_inside = sum(1 for la, lo in zip(st.drive.lat, st.drive.lon) if st.area.contains_buffered(la, lo))
+        total_nodes = walk_n + drive_n
+        total_inside = walk_inside + drive_inside
+        share_nodes_inside = round(100.0 * total_inside / max(1, total_nodes), 2)
+
+        pois_inside = sum(1 for p in st.pois if st.area.contains(p.lat, p.lon))
+        pois_outside = len(st.pois) - pois_inside
+
+        source_mtime_str = st.area.source_mtime
+        def _to_utc(s: str) -> Optional[datetime]:
+            if not s:
+                return None
+            try:
+                dt = datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc)
+            except Exception:
+                return None
+
+        source_dt = _to_utc(source_mtime_str) or datetime.now(timezone.utc)
+        walk_gen = str(st.walk.generated_at or "")
+        pois_gen = st.pois_generated_at.isoformat() if st.pois_generated_at else ""
+
+        stale_data = False
+        w_dt = _to_utc(walk_gen)
+        if w_dt and w_dt < source_dt:
+            stale_data = True
+        p_dt = _to_utc(pois_gen)
+        if p_dt and p_dt < source_dt:
+            stale_data = True
+    else:
+        walk_inside = walk_n
+        drive_inside = drive_n
+        share_nodes_inside = 100.0
+        pois_inside = len(st.pois)
+        pois_outside = 0
+        source_mtime_str = ""
+        walk_gen = str(st.walk.generated_at or "")
+        pois_gen = st.pois_generated_at.isoformat() if st.pois_generated_at else ""
+        stale_data = False
+
+    return {
+        "area_mode": cfg_data["area_mode"],
+        "area_source": cfg_data["area_source"],
+        "source_mtime": source_mtime_str,
+        "vertex_count": cfg_data["vertex_count"],
+        "area_km2": cfg_data["area_km2"],
+        "bbox": cfg_data["bbox"],
+        "placeholder_suspect": cfg_data["placeholder_suspect"],
+        "walk_nodes": walk_n,
+        "walk_edges": walk_m,
+        "drive_nodes": drive_n,
+        "drive_edges": drive_m,
+        "walk_nodes_inside": walk_inside,
+        "drive_nodes_inside": drive_inside,
+        "share_nodes_inside": share_nodes_inside,
+        "pois_inside": pois_inside,
+        "pois_outside": pois_outside,
+        "walk_generated_at": walk_gen,
+        "pois_generated_at": pois_gen,
+        "stale_data": stale_data,
+    }
 
 
 def ui_defaults(e) -> dict:
@@ -395,6 +494,21 @@ def streets(main: bool = False):
     return _STREETS[key]
 
 
+def _poi_category_group(cat: str, tags: dict) -> Optional[str]:
+    s = tags.get("shop", "")
+    hc = tags.get("healthcare", "")
+    a = tags.get("amenity", "")
+    if cat in ("pharmacy", "chemist") or hc == "pharmacy" or s == "chemist":
+        return "medicine"
+    if cat in ("food", "food_court", "bakery", "shop") or a in ("restaurant", "fast_food", "cafe", "food_court") or s in ("convenience", "supermarket", "kiosk", "bakery"):
+        return "food"
+    if cat in ("hospital", "clinic", "doctors") or a in ("hospital", "clinic", "doctors") or hc in ("hospital", "clinic"):
+        return "hospital"
+    if cat == "police" or a == "police":
+        return "police"
+    return None
+
+
 @router.get("/map/pois")
 def pois(time: Optional[str] = None):  # noqa: A002
     e = eng()
@@ -404,13 +518,327 @@ def pois(time: Optional[str] = None):  # noqa: A002
     with s.lock:
         for p in e.static.facilities:
             v = s.view(open_fact(s, p, t))
-            feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [p.lon, p.lat]},
-                          "properties": {"id": p.id, "name": p.label, "cat": p.cat, "status": v.status,
-                                         "open": v.value, "confidence": v.confidence, "note": v.note,
-                                         "source": v.source}})
+            tier = "unknown"
+            if v.value is False:
+                tier = "closed"
+            elif v.status == "KNOWN" and v.value is True:
+                tier = "open"
+            elif v.status == "PROBABLE" and v.value is True:
+                tier = "maybe_open"
+
+            group = _poi_category_group(p.cat, p.tags)
+            raw_oh = p.tags.get("opening_hours") or ""
+            is_24h = bool(raw_oh.strip().lower() == "24/7" or p.cat == "police" or p.tags.get("emergency") == "yes")
+            edited = p.edited_at.isoformat() if p.edited_at else None
+
+            feats.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [p.lon, p.lat]},
+                "properties": {
+                    "id": p.id,
+                    "name": p.label,
+                    "cat": p.cat,
+                    "category_group": group,
+                    "group": group,
+                    "status": v.status,
+                    "open": v.value,
+                    "tier": tier,
+                    "hours_state": {
+                        "tier": tier,
+                        "open": v.value,
+                        "status": v.status,
+                        "text": raw_oh,
+                        "note": v.note,
+                    },
+                    "confidence": v.confidence,
+                    "note": v.note,
+                    "source": v.source,
+                    "edited_at": edited,
+                    "last_osm_edit": edited,
+                    "is_24h": is_24h,
+                }
+            })
     lamps = [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [p.lon, p.lat]},
               "properties": {"cat": "street_lamp"}} for p in e.static.pois if p.cat == "street_lamp"]
     return {"type": "FeatureCollection", "features": feats + lamps, "time": t.isoformat(timespec="minutes")}
+
+
+@router.get("/layers")
+def list_layers():
+    e = eng()
+    s = e.state
+    st = e.static
+    layers_meta = []
+
+    # 1. VIIRS Night Lights
+    v_src = s.sources.get("viirs_ntl")
+    v_view = s.source_view("viirs_ntl") if v_src else None
+    v_data = getattr(st, "viirs_data", None)
+    v_cells = v_data.get("rows", []) if v_data else []
+    v_unknown = sum(1 for r in v_cells if r.get("radiance") is None or r.get("status_hint") == "UNKNOWN") if v_cells else 0
+    layers_meta.append({
+        "id": "viirs_ntl",
+        "name": "Night lights (VIIRS)",
+        "source": v_data.get("source") if v_data else "NASA Black Marble (VNP46) / Suomi NPP VIIRS DNB",
+        "product": v_data.get("product") if v_data else "VIIRS_Black_Marble",
+        "date_range": v_data.get("acquired_range") if v_data else None,
+        "retrieved_at": v_data.get("retrieved_at") if v_data else None,
+        "native_resolution": v_data.get("native_resolution", "15 arc-seconds (~500 m)") if v_data else "15 arc-seconds (~500 m)",
+        "units": v_data.get("unit", "nW·cm⁻²·sr⁻¹") if v_data else "nW·cm⁻²·sr⁻¹",
+        "license": v_data.get("license") if v_data else "NASA Open Data Policy / Public Domain",
+        "attribution": v_data.get("attribution") if v_data else "NASA EOSDIS / Black Marble Science Team",
+        "status": v_view.status if v_view else "UNKNOWN",
+        "confidence": v_view.confidence if v_view else 0.0,
+        "age_s": v_view.age_s if v_view else None,
+        "available": bool(v_data and v_src and v_src.enabled),
+        "cell_count": len(v_cells),
+        "unknown_share": round((v_unknown / max(1, len(v_cells))) * 100, 1),
+        "synthetic": False,
+        "note": "Blocky 500m cells showing nighttime artificial light radiance and percentile.",
+    })
+
+    # 2. Thermal LST
+    t_src = s.sources.get("thermal_lst")
+    t_view = s.source_view("thermal_lst") if t_src else None
+    t_data = getattr(st, "thermal_data", None)
+    t_cells = t_data.get("cells", []) if t_data else []
+    t_unknown = sum(1 for c in t_cells if c.get("value") is None or c.get("status") == "UNKNOWN") if t_cells else 0
+    layers_meta.append({
+        "id": "thermal_lst",
+        "name": "Night surface temperature (MODIS Aqua)",
+        "source": t_data.get("source") if t_data else "NASA LP DAAC / Microsoft Planetary Computer",
+        "product": t_data.get("product") if t_data else "MYD11A2.061",
+        "date_range": t_data.get("acquired_range") if t_data else None,
+        "retrieved_at": t_data.get("retrieved_at") if t_data else None,
+        "native_resolution": t_data.get("native_resolution", "1 km (Sinusoidal tile grid, nominal 926.6 m)") if t_data else "1 km",
+        "units": t_data.get("unit", "°C") if t_data else "°C",
+        "license": t_data.get("license") if t_data else "NASA Open Data Policy (CC0 / Public Domain)",
+        "attribution": t_data.get("attribution") if t_data else "NASA EOSDIS LP DAAC",
+        "status": t_view.status if t_view else "UNKNOWN",
+        "confidence": t_view.confidence if t_view else 0.0,
+        "age_s": t_view.age_s if t_view else None,
+        "available": bool(t_data and t_src and t_src.enabled),
+        "cell_count": len(t_cells),
+        "unknown_share": round((t_unknown / max(1, len(t_cells))) * 100, 1),
+        "synthetic": False,
+        "note": "1 km land-surface temperature from MODIS Aqua night pass (~01:30 local). Cloud-masked cells remain UNKNOWN.",
+    })
+
+    # 3. Weather Grid
+    w_src = s.sources.get("weather_grid")
+    w_view = s.source_view("weather_grid") if w_src else None
+    w_data = getattr(st, "weather_grid_data", None)
+    w_points = w_data.get("points", []) if w_data else []
+    w_times = w_points[0].get("hourly", {}).get("time", []) if w_points else []
+    w_date_range = f"{w_times[0]} to {w_times[-1]}" if w_times else None
+    layers_meta.append({
+        "id": "weather_grid",
+        "name": "Weather forecast grid (Open-Meteo)",
+        "source": w_data.get("source") if w_data else "Open-Meteo API / DWD ICON & ECMWF IFS",
+        "product": w_data.get("model") if w_data else "ECMWF IFS / DWD ICON blended forecast",
+        "date_range": w_date_range,
+        "retrieved_at": w_data.get("retrieved_at") if w_data else None,
+        "native_resolution": w_data.get("native_resolution", "0.1° (~11 km) sampled at 2.0 km grid") if w_data else "2.0 km grid",
+        "units": w_data.get("units", {}).get("temperature_2m", "°C") if w_data else "°C",
+        "license": w_data.get("license") if w_data else "Weather data by Open-Meteo.com (CC BY 4.0)",
+        "attribution": w_data.get("attribution") if w_data else "Open-Meteo.com under CC BY 4.0",
+        "status": w_view.status if w_view else "UNKNOWN",
+        "confidence": w_view.confidence if w_view else 0.0,
+        "age_s": w_view.age_s if w_view else None,
+        "available": bool(w_data and w_src and w_src.enabled),
+        "cell_count": len(w_points),
+        "unknown_share": 0.0,
+        "synthetic": False,
+        "note": "2 km multi-point hourly forecast grid driving air temperature, wind, and precipitation layers.",
+    })
+
+    return layers_meta
+
+
+@router.get("/layers/{layer_id}")
+def get_layer(layer_id: str, hour: Optional[int] = None):
+    e = eng()
+    st = e.static
+    s = e.state
+
+    if layer_id == "viirs_ntl":
+        data = getattr(st, "viirs_data", None)
+        if not data:
+            raise HTTPException(404, "Layer 'viirs_ntl' file is absent. Run scripts/fetch_viirs.py first.")
+        cell_size = float(data.get("cell_size_deg", 0.004167))
+        half = cell_size / 2.0
+        unit = data.get("unit", "nW·cm⁻²·sr⁻¹")
+        acq = data.get("retrieved_at")
+        feats = []
+        for r in data.get("rows", []):
+            lat, lon = float(r["lat"]), float(r["lon"])
+            val = r.get("radiance")
+            status_val = "UNKNOWN" if (val is None or r.get("status_hint") == "UNKNOWN") else "KNOWN"
+            coords = [
+                [round(lon - half, 6), round(lat - half, 6)],
+                [round(lon + half, 6), round(lat - half, 6)],
+                [round(lon + half, 6), round(lat + half, 6)],
+                [round(lon - half, 6), round(lat + half, 6)],
+                [round(lon - half, 6), round(lat - half, 6)],
+            ]
+            feats.append({
+                "type": "Feature",
+                "geometry": {"type": "Polygon", "coordinates": [coords]},
+                "properties": {
+                    "i": r.get("i"),
+                    "j": r.get("j"),
+                    "lat": lat,
+                    "lon": lon,
+                    "value": val,
+                    "percentile": r.get("percentile"),
+                    "unit": unit,
+                    "status": status_val,
+                    "acquisition_time": acq,
+                }
+            })
+        return {
+            "type": "FeatureCollection",
+            "layer_id": layer_id,
+            "metadata": {
+                "source": data.get("source"),
+                "product": data.get("product"),
+                "native_resolution": data.get("native_resolution"),
+                "unit": unit,
+                "cell_size_deg": cell_size,
+            },
+            "features": feats,
+        }
+
+    elif layer_id == "thermal_lst":
+        data = getattr(st, "thermal_data", None)
+        if not data:
+            raise HTTPException(404, "Layer 'thermal_lst' file is absent. Run scripts/fetch_thermal.py first.")
+        dlat = 926.625 / 111195.0
+        unit = data.get("unit", "°C")
+        acq = data.get("acquisition_time") or data.get("retrieved_at")
+        feats = []
+        for c in data.get("cells", []):
+            lat, lon = float(c["lat"]), float(c["lon"])
+            cos_l = math.cos(math.radians(lat))
+            dlon = dlat / cos_l if abs(cos_l) > 1e-6 else dlat
+            half_lat = dlat / 2.0
+            half_lon = dlon / 2.0
+            val = c.get("value")
+            status_val = c.get("status", "UNKNOWN") if val is not None else "UNKNOWN"
+            coords = [
+                [round(lon - half_lon, 6), round(lat - half_lat, 6)],
+                [round(lon + half_lon, 6), round(lat - half_lat, 6)],
+                [round(lon + half_lon, 6), round(lat + half_lat, 6)],
+                [round(lon - half_lon, 6), round(lat + half_lat, 6)],
+                [round(lon - half_lon, 6), round(lat - half_lat, 6)],
+            ]
+            feats.append({
+                "type": "Feature",
+                "geometry": {"type": "Polygon", "coordinates": [coords]},
+                "properties": {
+                    "i": c.get("i"),
+                    "j": c.get("j"),
+                    "lat": lat,
+                    "lon": lon,
+                    "value": val,
+                    "unit": unit,
+                    "status": status_val,
+                    "quality": c.get("quality", "clear"),
+                    "acquisition_time": c.get("acquisition_time") or acq,
+                }
+            })
+        return {
+            "type": "FeatureCollection",
+            "layer_id": layer_id,
+            "metadata": {
+                "source": data.get("source"),
+                "product": data.get("product"),
+                "native_resolution": data.get("native_resolution"),
+                "unit": unit,
+            },
+            "features": feats,
+        }
+
+    elif layer_id == "weather_grid":
+        data = getattr(st, "weather_grid_data", None)
+        if not data:
+            raise HTTPException(404, "Layer 'weather_grid' file is absent. Run scripts/fetch_weather_grid.py first.")
+
+        h_idx = 2  # default 02:00
+        if hour is not None:
+            h_idx = max(0, int(hour))
+        else:
+            sim_h = s.now().hour
+            h_idx = sim_h
+
+        unit = data.get("units", {}).get("temperature_2m", "°C")
+        grid_km = float(data.get("grid_spacing_km", 2.0))
+        dlat = (grid_km * 1000.0) / 111195.0
+        acq = data.get("retrieved_at")
+
+        feats = []
+        for pt in data.get("points", []):
+            lat, lon = float(pt["lat"]), float(pt["lon"])
+            cos_l = math.cos(math.radians(lat))
+            dlon = dlat / cos_l if abs(cos_l) > 1e-6 else dlat
+            half_lat = dlat / 2.0
+            half_lon = dlon / 2.0
+
+            hly = pt.get("hourly", {})
+            times = hly.get("time", [])
+            idx = min(h_idx, len(times) - 1) if times else 0
+            t_str = times[idx] if idx < len(times) else None
+            temp = hly.get("temperature_2m", [])[idx] if idx < len(hly.get("temperature_2m", [])) else None
+            app_temp = hly.get("apparent_temperature", [])[idx] if idx < len(hly.get("apparent_temperature", [])) else None
+            precip = hly.get("precipitation", [])[idx] if idx < len(hly.get("precipitation", [])) else None
+            cloud = hly.get("cloud_cover", [])[idx] if idx < len(hly.get("cloud_cover", [])) else None
+            wind = hly.get("wind_speed_10m", [])[idx] if idx < len(hly.get("wind_speed_10m", [])) else None
+            rh = hly.get("relative_humidity_2m", [])[idx] if idx < len(hly.get("relative_humidity_2m", [])) else None
+
+            coords = [
+                [round(lon - half_lon, 6), round(lat - half_lat, 6)],
+                [round(lon + half_lon, 6), round(lat - half_lat, 6)],
+                [round(lon + half_lon, 6), round(lat + half_lat, 6)],
+                [round(lon - half_lon, 6), round(lat + half_lat, 6)],
+                [round(lon - half_lon, 6), round(lat - half_lat, 6)],
+            ]
+            feats.append({
+                "type": "Feature",
+                "geometry": {"type": "Polygon", "coordinates": [coords]},
+                "properties": {
+                    "id": pt.get("id"),
+                    "lat": lat,
+                    "lon": lon,
+                    "hour": h_idx,
+                    "time": t_str,
+                    "value": temp,
+                    "temperature_2m": temp,
+                    "apparent_temperature": app_temp,
+                    "precipitation": precip,
+                    "cloud_cover": cloud,
+                    "wind_speed_10m": wind,
+                    "relative_humidity_2m": rh,
+                    "unit": unit,
+                    "status": "KNOWN" if temp is not None else "UNKNOWN",
+                    "acquisition_time": acq,
+                }
+            })
+
+        return {
+            "type": "FeatureCollection",
+            "layer_id": layer_id,
+            "hour": h_idx,
+            "metadata": {
+                "source": data.get("source"),
+                "model": data.get("model"),
+                "native_resolution": data.get("native_resolution"),
+                "units": data.get("units", {}),
+            },
+            "features": feats,
+        }
+
+    else:
+        raise HTTPException(404, f"Layer '{layer_id}' not recognized. Supported: viirs_ntl, thermal_lst, weather_grid.")
 
 
 @router.get("/map/transit")

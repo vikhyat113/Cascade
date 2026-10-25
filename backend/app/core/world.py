@@ -7,6 +7,7 @@ state lives in state.WorldState.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -80,7 +81,9 @@ class EdgeStatic:
     """Per-edge static features for one graph."""
 
     def __init__(self, G: RoadGraph, lamp_tree: Optional[cKDTree], osm_fact: Fact, prior_fact: Fact,
-                 now: datetime, fc: FreshnessConfig, grid: Grid, tgrid: Grid, cgrid: Grid):
+                 now: datetime, fc: FreshnessConfig, grid: Grid, tgrid: Grid, cgrid: Grid,
+                 viirs_tree: Optional[cKDTree] = None, viirs_percentiles: Optional[np.ndarray] = None,
+                 use_viirs_prior: bool = False):
         m = G.m
         self.light_lo = np.zeros(m)
         self.light_hi = np.zeros(m)
@@ -92,6 +95,11 @@ class EdgeStatic:
         lamps = np.zeros(m, dtype=int)
         if lamp_tree is not None:
             lamps = np.array([len(x) for x in lamp_tree.query_ball_point(np.c_[G.emx, G.emy], r=35.0)])
+        use_viirs = bool(use_viirs_prior and viirs_tree is not None and viirs_percentiles is not None and len(viirs_percentiles) > 0)
+        nn_indices = None
+        if use_viirs:
+            _, nn_indices = viirs_tree.query(np.c_[G.emx, G.emy])
+
         for e in range(m):
             lit = (G.elit[e] or "").lower() or None
             hw = G.ehw[e]
@@ -103,6 +111,13 @@ class EdgeStatic:
                 self._set(e, 0.35, 0.6, osm_st, osm_c, "partly lit (OSM lit=limited)")
             elif hw in MAIN_ROADS:
                 self._set(e, 0.15, 0.6, pr_st, pr_c, "no lighting data; main-road prior")
+            elif use_viirs and nn_indices is not None and not np.isnan(viirs_percentiles[nn_indices[e]]):
+                pct = float(viirs_percentiles[nn_indices[e]])
+                norm_p = pct / 100.0
+                darkness = 1.0 - norm_p
+                lo = max(0.0, darkness - 0.25)
+                hi = min(1.0, darkness + 0.25)
+                self._set(e, lo, hi, "PROBABLE", 0.45, f"no OSM lighting; VIIRS satellite radiance prior (pct {pct:.0f}%)")
             elif hw in MINOR_ROADS:
                 self._set(e, 0.25, 0.9, "UNKNOWN", 0.0, "no lighting data")
             else:
@@ -124,8 +139,38 @@ class StaticWorld:
         self.data_path = data_path
         self.tz = ZoneInfo(cfg["timezone"])
         self.night = night_date_for(cfg, self.tz)
-        self.center = (float(cfg["center"]["lat"]), float(cfg["center"]["lon"]))
-        self.radius = float(cfg["radius_m"])
+        if not cfg.get("area_polygon"):
+            self.area = None
+        else:
+            poly_str = str(cfg["area_polygon"])
+            backend_dir = Path(__file__).resolve().parents[2]
+            root_dir = Path(__file__).resolve().parents[3]
+            cand = [
+                Path(poly_str),
+                (backend_dir / poly_str).resolve(),
+                (root_dir / poly_str).resolve(),
+                root_dir / "data" / Path(poly_str).name,
+                data_path / Path(poly_str).name,
+                data_path / poly_str,
+                (data_path.parent / poly_str).resolve(),
+            ]
+            self.area = None
+            for p in cand:
+                if p.exists() and p.is_file():
+                    from ..adapters.area import load_area
+                    self.area = load_area(p, buffer_m=cfg.get("area_buffer_m", 300))
+                    break
+            if self.area is None:
+                raise FileNotFoundError(
+                    f"Configured area_polygon '{cfg.get('area_polygon')}' was not found. "
+                    "Silent fallback to circle is not permitted when area_polygon is configured."
+                )
+        if self.area is not None:
+            self.center = (float(self.area.centroid["lat"]), float(self.area.centroid["lon"]))
+            self.radius = float(round(self.area.max_distance_to_vertex(), 1))
+        else:
+            self.center = (float(cfg["center"]["lat"]), float(cfg["center"]["lon"]))
+            self.radius = float(cfg["radius_m"])
         self.proj = LocalProjection(*self.center)
         self.fc = FreshnessConfig.from_config(cfg)
         self.seed = int(cfg.get("seed", 42))
@@ -154,10 +199,49 @@ class StaticWorld:
                                                               self.night, self.tz, self.proj)
         self.weather = WeatherCache(data_path / "weather_cache.json", self.tz)
 
-        half = self.radius + 600
+        if self.area is not None:
+            coords = list(self.area.polygon.exterior.coords)
+            xs, ys = self.proj.xy([c[1] for c in coords], [c[0] for c in coords])
+            max_extent = max(float(np.max(np.abs(xs))), float(np.max(np.abs(ys))))
+            half = max_extent + 600.0
+        else:
+            half = self.radius + 600.0
         self.grid = Grid(half, self.risk_cfg.get("grid_m", 250))
         self.tgrid = Grid(half, self.risk_cfg.get("traffic_cell_m", 500))
         self.cgrid = Grid(half, self.risk_cfg.get("cab_zone_m", 1000))
+
+        # Polygon-clipped data layers
+        def _read_data_json(name: str) -> Optional[dict]:
+            p = data_path / name
+            if not p.exists():
+                return None
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+
+        self.viirs_data = _read_data_json("viirs_ntl.json")
+        self.viirs_observed_at = _ts(self.viirs_data.get("retrieved_at")) if self.viirs_data else None
+
+        self.thermal_data = _read_data_json("thermal_lst.json")
+        self.thermal_observed_at = _ts(self.thermal_data.get("acquisition_time") or self.thermal_data.get("retrieved_at")) if self.thermal_data else None
+
+        self.weather_grid_data = _read_data_json("weather_grid.json")
+        self.weather_grid_observed_at = _ts(self.weather_grid_data.get("retrieved_at")) if self.weather_grid_data else None
+
+        viirs_tree = None
+        viirs_percentiles = None
+        if self.viirs_data and "rows" in self.viirs_data:
+            v_rows = [r for r in self.viirs_data["rows"] if r.get("lat") is not None and r.get("lon") is not None]
+            if v_rows:
+                v_lats = [r["lat"] for r in v_rows]
+                v_lons = [r["lon"] for r in v_rows]
+                v_xs, v_ys = self.proj.xy(v_lats, v_lons)
+                viirs_tree = cKDTree(np.c_[v_xs, v_ys])
+                viirs_percentiles = np.array([r.get("percentile", np.nan) for r in v_rows], dtype=float)
+        self.viirs_tree = viirs_tree
+        self.viirs_percentiles = viirs_percentiles
+        self.use_viirs_prior = bool(cfg.get("use_viirs_lighting_prior", False))
 
         osm = self.source_cfg["osm_map"]
         osm_fact = Fact(key="osm_map", value="ok", source="osm_map", synthetic=False,
@@ -166,9 +250,13 @@ class StaticWorld:
         prior_fact = Fact(key="prior:lighting", value="main roads usually lit", source="prior", synthetic=False,
                           observed_at=self.map_generated_at, ttl_s=osm["ttl_s"], reliability=0.5, kind="prior")
         self.walk_static = EdgeStatic(self.walk, lamp_tree, osm_fact, prior_fact, load_now, self.fc,
-                                      self.grid, self.tgrid, self.cgrid)
+                                      self.grid, self.tgrid, self.cgrid,
+                                      viirs_tree=self.viirs_tree, viirs_percentiles=self.viirs_percentiles,
+                                      use_viirs_prior=self.use_viirs_prior)
         self.drive_static = EdgeStatic(self.drive, lamp_tree, osm_fact, prior_fact, load_now, self.fc,
-                                       self.grid, self.tgrid, self.cgrid)
+                                       self.grid, self.tgrid, self.cgrid,
+                                       viirs_tree=self.viirs_tree, viirs_percentiles=self.viirs_percentiles,
+                                       use_viirs_prior=self.use_viirs_prior)
         rng = np.random.default_rng(self.seed)
         self.traffic_bias = rng.uniform(0.9, 1.05, self.tgrid.ncells)
         self.traffic_cells = np.unique(self.drive_static.tcell)
@@ -312,5 +400,8 @@ class StaticWorld:
         return out
 
     def in_area(self, lat: float, lon: float) -> bool:
+        if self.area is not None:
+            return self.area.contains_buffered(lat, lon)
         x, y = self.proj.xy(lat, lon)
         return float(np.hypot(x, y)) <= self.radius + 300
+

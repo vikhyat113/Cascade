@@ -44,4 +44,89 @@ export interface SimpleView {
 
 export interface UiDefaults { home: Place; work: Place; start: Place; deadline: string | null }
 
-export interface AppConfig { city_name: string; center: { lat: number; lon: number }; radius_m: number; ui_defaults: UiDefaults }
+export interface AppConfig {
+  city_name: string;
+  center: { lat: number; lon: number };
+  radius_m: number;
+  area_mode?: "polygon" | "circle_fallback";
+  area_source?: string;
+  vertex_count?: number;
+  area_km2?: number;
+  bbox?: [number, number, number, number];
+  placeholder_suspect?: boolean;
+  polygon?: { type: "Polygon"; coordinates: [number, number][][] } | null;
+  ui_defaults: UiDefaults;
+}
+
+export interface AreaDiagnostics {
+  area_mode: "polygon" | "circle_fallback";
+  area_source: string;
+  source_mtime: string;
+  vertex_count: number;
+  area_km2: number;
+  bbox: [number, number, number, number];
+  placeholder_suspect: boolean;
+  walk_nodes: number;
+  walk_edges: number;
+  drive_nodes: number;
+  drive_edges: number;
+  walk_nodes_inside: number;
+  drive_nodes_inside: number;
+  share_nodes_inside: number;
+  pois_inside: number;
+  pois_outside: number;
+  walk_generated_at: string;
+  pois_generated_at: string;
+  stale_data: boolean;
+}
+
+export type StatusTier = "KNOWN" | "PROBABLE" | "OUTDATED" | "UNKNOWN";
+
+export interface LayerMeta {
+  id: string;
+  name: string;
+  source: string;
+  product?: string;
+  date_range?: string | null;
+  retrieved_at?: string | null;
+  native_resolution: string;
+  units: string;
+  license: string;
+  attribution: string;
+  status: StatusTier;
+  confidence: number;
+  age_s: number | null;
+  available: boolean;
+  cell_count: number;
+  unknown_share: number;
+  synthetic: boolean;
+  note: string;
+  error?: string;
+  older_than_area?: boolean;
+}
+
+export type FacilityCategory = "medicine" | "food" | "hospital" | "police";
+export type HoursTier = "open" | "maybe_open" | "unknown" | "closed";
+
+export interface FacilityPOI {
+  id: string;
+  name: string;
+  cat: string;
+  category_group: FacilityCategory | null;
+  lat: number;
+  lon: number;
+  tier: HoursTier;
+  hours_state: {
+    tier: HoursTier;
+    open: boolean | null;
+    status: string;
+    text: string;
+    note?: string;
+  };
+  last_osm_edit: string | null;
+  is_24h: boolean;
+  dist_m?: number;
+  walk_min?: number;
+}
+
+

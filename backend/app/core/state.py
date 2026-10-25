@@ -20,12 +20,16 @@ from .facts import Fact, FactView
 from .freshness import confidence, status, view
 from .world import StaticWorld
 
-STATIC_SOURCES = ("osm_map", "osm_hours", "weather_forecast", "transit_schedule", "incident_history")
+STATIC_SOURCES = ("osm_map", "osm_hours", "weather_forecast", "transit_schedule", "incident_history",
+                  "viirs_ntl", "thermal_lst", "weather_grid")
 
 CREDITS = {
     "osm_map": "© OpenStreetMap contributors (ODbL)",
     "osm_hours": "© OpenStreetMap contributors (ODbL)",
     "weather_forecast": "Weather data by Open-Meteo.com (CC BY 4.0)",
+    "viirs_ntl": "NASA EOSDIS / Black Marble Science Team (Public Domain)",
+    "thermal_lst": "NASA EOSDIS Land Processes DAAC / USGS (Public Domain)",
+    "weather_grid": "Weather data by Open-Meteo.com (CC BY 4.0)",
 }
 
 
@@ -122,6 +126,9 @@ class WorldState:
             "weather_forecast": st.weather.fetched_at,
             "transit_schedule": st.transit.generated_at if st.transit else None,
             "incident_history": st.incidents_generated_at,
+            "viirs_ntl": getattr(st, "viirs_observed_at", None),
+            "thermal_lst": getattr(st, "thermal_observed_at", None),
+            "weather_grid": getattr(st, "weather_grid_observed_at", None),
         }.get(sid)
 
     def heartbeat(self, sid: str) -> Optional[Fact]:

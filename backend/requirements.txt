@@ -7,5 +7,6 @@ scipy>=1.11
 PyYAML>=6.0
 httpx>=0.27
 tzdata>=2024.1      # IANA time zones on Windows
+shapely>=2.0
 # Tests
 pytest>=8.0

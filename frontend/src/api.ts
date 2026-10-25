@@ -29,4 +29,11 @@ export const api = {
   sos: (at: Place, lang: Lang) => post<{ hospital: PlaceOnWay | null; police: PlaceOnWay | null }>("/api/sos", { lat: at.lat, lon: at.lon, lang }),
   share: (id: string) => post<{ url: string }>("/api/share", { plan_id: id }),
   streetsMain: () => req<GeoJSON.FeatureCollection>("/api/map/streets?main=1"),
+  streetsAll: () => req<GeoJSON.FeatureCollection>("/api/map/streets"),
+  areaDiagnostics: () => req<import("./types").AreaDiagnostics>("/api/area/diagnostics"),
+  layers: () => req<import("./types").LayerMeta[]>("/api/layers"),
+  layerData: (id: string, hour?: number) =>
+    req<GeoJSON.FeatureCollection>(`/api/layers/${id}${hour !== undefined ? `?hour=${hour}` : ""}`),
+  mapPois: (time?: string) =>
+    req<GeoJSON.FeatureCollection>(`/api/map/pois${time ? `?time=${encodeURIComponent(time)}` : ""}`),
 };

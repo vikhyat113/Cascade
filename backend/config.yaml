@@ -2,6 +2,8 @@
 city_name: "Noida (Sector 18 area)"
 center: {lat: 28.5705, lon: 77.3229}
 radius_m: 4000
+area_polygon: "../data/area.geojson"
+area_buffer_m: 300
 timezone: "Asia/Kolkata"
 
 seed: 42
@@ -45,6 +47,12 @@ sources:
   cab_availability: {label: "Cab / auto availability",        kind: observed,  ttl_s: 300,      reliability: 0.6,  synthetic: true,  live: true, dropout: 0.05, max_delay_s: 30}
   incident_reports: {label: "Live incident reports",          kind: observed,  ttl_s: 600,      reliability: 0.6,  synthetic: true,  live: true, dropout: 0.05, max_delay_s: 60}
   incident_history: {label: "Incident history (90 nights)",   kind: inferred,  ttl_s: 31536000, reliability: 0.6,  synthetic: true,  live: false}
+  viirs_ntl:        {label: "VIIRS night lights (NASA Black Marble)", kind: observed, ttl_s: 3888000, reliability: 0.85, synthetic: false, live: false}
+  thermal_lst:      {label: "MODIS Aqua night surface temperature",   kind: observed, ttl_s: 259200,  reliability: 0.8,  synthetic: false, live: false}
+  weather_grid:     {label: "Open-Meteo 2km weather grid",            kind: inferred, ttl_s: 86400,   reliability: 0.8,  synthetic: false, live: false}
+
+# ---- Lighting Prior ----
+use_viirs_lighting_prior: false
 
 # ---- Risk model ----
 risk:
