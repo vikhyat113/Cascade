@@ -6,6 +6,8 @@ const config: CapacitorConfig = {
   appName: "NightWay",
   webDir: "dist",
   android: { backgroundColor: "#0a0f1e" },
+  // OpenStreetMap's tile policy asks apps to identify themselves
+  appendUserAgent: "NightWay-hackathon/0.1",
   plugins: {
     // lets the WebView reach the plain-http demo dispatch server (http://localhost:8787 over `adb reverse`)
     CapacitorHttp: { enabled: true },

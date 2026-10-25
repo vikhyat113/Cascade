@@ -2,6 +2,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useRef } from "react";
 import { useT } from "../copy";
+import { CONFIG } from "../config";
 import { call } from "../lib/engine";
 import { THEME } from "../theme";
 import type { LatLon, PlaceOnWay } from "../types";
@@ -16,6 +17,7 @@ type Props = {
   places?: PlaceOnWay[];
   fitKey?: string;
   bottomPad: number;
+  topPad?: number;          // room for cards over the top of the map (pill, next step)
   onPick?: ((lat: number, lon: number) => void) | null;
 };
 
@@ -48,8 +50,9 @@ function lines(pts: Float32Array, off: Uint32Array): LatLon[][] {
   return out;
 }
 
-/** Dark map with no downloaded tiles: the road network bundled in the app (major roads brighter). */
-export function MapCanvas({ center, path, start, end, me, places, fitKey, bottomPad, onPick }: Props) {
+/** Dark street map: OpenStreetMap tiles in a night palette when online. The road network bundled in
+ *  the app (major roads brighter) is drawn until tiles load and whenever they can't (offline). */
+export function MapCanvas({ center, path, start, end, me, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
@@ -59,24 +62,48 @@ export function MapCanvas({ center, path, start, end, me, places, fitKey, bottom
 
   useEffect(() => {
     if (!box.current) return;
-    const m = L.map(box.current, { zoomControl: false, attributionControl: true, preferCanvas: true, minZoom: 12, maxZoom: 18 })
+    const m = L.map(box.current, { zoomControl: false, attributionControl: true, preferCanvas: true, minZoom: 12, maxZoom: CONFIG.map.maxZoom })
       .setView([center.lat, center.lon], 14);
     m.attributionControl.setPrefix(false);
-    m.attributionControl.addAttribution('© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>');
-    m.createPane("roads").style.zIndex = "350";             // below the way, pins and dots (overlayPane is 400)
+    const tiles = L.tileLayer(CONFIG.map.tileUrl, {
+      className: "nw-tiles", maxZoom: CONFIG.map.maxZoom,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(m);
+
+    // bundled roads: shown until tiles load, and again when tiles fail or the phone goes offline
+    m.createPane("roads").style.zIndex = "350";             // above tiles, below the way, pins and dots (overlayPane is 400)
     const renderer = L.canvas({ padding: 0.3, pane: "roads" });
+    const roads = L.layerGroup();
+    // one map or the other, never both: street tiles when they load, else only our roads
+    let tilesOk = false, errors = 0, shown: boolean | null = null;
+    const sync = () => {
+      const useTiles = tilesOk && navigator.onLine;
+      if (useTiles === shown) return;
+      shown = useTiles;
+      tiles.setOpacity(useTiles ? 1 : 0);
+      if (useTiles) roads.remove(); else roads.addTo(m);
+    };
+    tiles.on("tileload", () => { errors = 0; tilesOk = true; sync(); });
+    tiles.on("tileerror", () => { if (++errors >= CONFIG.map.tileErrorsBeforeRoads) { tilesOk = false; sync(); } });
+    const online = () => { errors = 0; tiles.redraw(); sync(); };     // signal back: try the tiles again
+    window.addEventListener("online", online);
+    window.addEventListener("offline", sync);
+    sync();
     let stop = false;
     call("roads").then((r) => {
       if (stop) return;
-      L.polyline(lines(r.minor, r.minorOff), { renderer, color: C.roadMinor, weight: 1.5, opacity: 1, interactive: false, smoothFactor: 1.5 }).addTo(m);
-      L.polyline(lines(r.major, r.majorOff), { renderer, color: C.roadMajor, weight: 3, opacity: 1, interactive: false, smoothFactor: 1.5 }).addTo(m);
+      L.polyline(lines(r.minor, r.minorOff), { renderer, color: C.roadMinor, weight: 1.5, opacity: 1, interactive: false, smoothFactor: 1.5 }).addTo(roads);
+      L.polyline(lines(r.major, r.majorOff), { renderer, color: C.roadMajor, weight: 3, opacity: 1, interactive: false, smoothFactor: 1.5 }).addTo(roads);
     }).catch(() => {});
     layer.current = L.layerGroup().addTo(m);
     m.on("click", (e: L.LeafletMouseEvent) => pickRef.current?.(e.latlng.lat, e.latlng.lng));
     map.current = m;
     const ro = new ResizeObserver(() => m.invalidateSize());
     ro.observe(box.current);
-    return () => { stop = true; ro.disconnect(); m.remove(); map.current = null; };
+    return () => {
+      stop = true; ro.disconnect(); m.remove(); map.current = null;
+      window.removeEventListener("online", online); window.removeEventListener("offline", sync);
+    };
   }, [center.lat, center.lon]);
 
   useEffect(() => {
@@ -102,8 +129,9 @@ export function MapCanvas({ center, path, start, end, me, places, fitKey, bottom
     if (end) pts.push(end);
     if (pts.length === 0) return;
     if (pts.length === 1) { m.setView(pts[0], 15); return; }
-    m.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [28, 80], paddingBottomRight: [28, bottomPad + 24], maxZoom: 16 });
-  }, [fitKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    m.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [28, topPad], paddingBottomRight: [28, bottomPad + 24], maxZoom: 16 });
+    // also re-fit when the sheet settles to its new height (a new screen measures its sheet after the first paint)
+  }, [fitKey, Math.round(bottomPad / 40), topPad]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // `isolate` + z-0: Leaflet panes use z-index 400+; keep them below the sheet, pill and banner.
   return <div ref={box} className="absolute inset-0 isolate z-0" style={{ cursor: onPick ? "crosshair" : undefined }} role="img" aria-label={t("label.map")} />;

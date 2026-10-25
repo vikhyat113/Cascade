@@ -81,6 +81,13 @@ export const CONFIG = {
     weatherProbeEveryS: 900,  // real Open-Meteo probe when online
     weatherProbeOkS: 1800,    // pill says Live if the last probe is newer than this
   },
+  map: {
+    // street map tiles when online (OpenStreetMap standard, light use with attribution); the road network
+    // bundled in the app takes over when tiles can't load, so the map always works offline
+    tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    maxZoom: 19,
+    tileErrorsBeforeRoads: 3,
+  },
   dispatch: {
     // the phone reaches the laptop over Wi-Fi: set VITE_DISPATCH_URL at build time or in the Demo drawer
     defaultUrl: import.meta.env.VITE_DISPATCH_URL || "http://localhost:8787",

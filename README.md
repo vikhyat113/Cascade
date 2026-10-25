@@ -61,7 +61,7 @@ backend/       the original Python engine, kept as the reference (same 8 scenari
 legacy/        replaced code and earlier specs (see AUDIT.md)
 ```
 
-- **Offline first**: the map is drawn from the bundled road network (no tiles), places and opening hours are bundled, and the weather forecast is a saved snapshot. With no signal, the app says **"Offline: using saved info"**, live information stops arriving, facts age (Known → Probable → Outdated → Unknown), and plans become more careful instead of breaking.
+- **Offline first**: online the map shows OpenStreetMap streets in a night palette; offline it switches to the road network bundled in the app. Places and opening hours are bundled, and the weather forecast is a saved snapshot. With no signal, the app says **"Offline: using saved info"**, live information stops arriving, facts age (Known → Probable → Outdated → Unknown), and plans become more careful instead of breaking.
 - **Live**: when online, a real Open-Meteo reading is fetched every 15 min; the pill shows **Live**.
 - **Saved on the phone** (Capacitor Preferences): Home, Work, language, the last trip (a started trip carries on after a restart), the dispatch address.
 

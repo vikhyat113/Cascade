@@ -268,7 +268,7 @@ function Main() {
   const demo = { showDemo: SHOW_DEMO, onDemo: () => setDemoOpen(true) };
   return (
     <div className="relative h-full overflow-hidden">
-      <MapCanvas center={cfg.center} bottomPad={sheetH} {...mapView}
+      <MapCanvas center={cfg.center} bottomPad={sheetH} topPad={screen === "trip" ? 150 : 80} {...mapView}
         onPick={screen === "pick" ? async (lat, lon) => {
           const name = (await call("where", lat, lon).catch(() => null)) || t("label.pickedPoint");
           choosePlace({ lat, lon, name }, field === "to" ? pickSave : null);
