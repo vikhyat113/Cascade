@@ -1,0 +1,10 @@
+{
+  "name": "NightWay",
+  "short_name": "NightWay",
+  "description": "A safe way home at night.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f1e",
+  "theme_color": "#0a0f1e",
+  "icons": [{ "src": "/moon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

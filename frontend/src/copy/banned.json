@@ -1,0 +1,12 @@
+{
+  "_note": "UI_SPEC §3. Checked by frontend/src/copy/copy.test.ts (every string in en.ts) and backend/tests/test_simple_view.py (every sentence the simple view produces). Phrases match whole words, case-insensitive.",
+  "banned": [
+    "eta", "feasible", "feasibility", "confidence", "probability", "route", "routes", "routing",
+    "fallback", "contingency", "latency", "stale", "ttl", "freshness", "data source", "feed", "feeds",
+    "api", "synthetic", "simulated", "simulation", "interval", "range", "worst case", "worst-case",
+    "algorithm", "model", "engine", "ambiguous", "unreliable", "degraded",
+    "known", "probable", "outdated", "unknown"
+  ],
+  "limits": {"cta": 4, "label": 3, "line": 8, "explain": 12, "fmt": 8, "reason": 5},
+  "reason_max_words": 12
+}

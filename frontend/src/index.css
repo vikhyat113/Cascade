@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* Night theme (UI_SPEC §1.7): dark, high contrast, ONE accent colour.
+   Type: body 17px, key text 26px+, nothing smaller than 14px. Tap targets >= 48px.
+   Sizes are in rem so the phone's large-font setting scales everything. */
+@theme {
+  --color-night: #0a0f1e;
+  --color-surface: #131b31;
+  --color-raised: #1c2642;
+  --color-edge: #2c3860;
+  --color-ink: #f4f6ff;
+  --color-soft: #c3cae6;          /* secondary text, 9.6:1 on surface */
+  --color-accent: #8b7cff;        /* the one accent: buttons, route line */
+  --color-accent-ink: #0a0f1e;
+  --color-good: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --color-help: #e5484d;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif;
+  --text-body: 1.0625rem;         /* 17px */
+  --text-key: 1.625rem;           /* 26px */
+  --text-huge: 2rem;              /* 32px */
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--color-night);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+
+/* Leaflet: dark base map by inverting the standard OSM tiles; keep controls quiet */
+.leaflet-container { background: #0b1222 !important; font-family: var(--font-sans); }
+.nw-tiles { filter: invert(100%) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.6); }
+.leaflet-control-attribution { font-size: 11px !important; background: rgba(10, 15, 30, 0.7) !important; color: #c3cae6 !important; }
+.leaflet-control-attribution a { color: #c3cae6 !important; }
+.leaflet-div-icon { background: transparent; border: none; }
+
+@keyframes nw-pulse { 0% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.7); } 100% { box-shadow: 0 0 0 14px rgba(96, 165, 250, 0); } }
+.nw-me { width: 18px; height: 18px; border-radius: 50%; background: #60a5fa; border: 3px solid #fff; animation: nw-pulse 2s infinite; }
+@media (prefers-reduced-motion: reduce) { .nw-me { animation: none; } * { transition: none !important; } }
+
+.nw-sheet { box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55); }
+.scroll-quiet { scrollbar-width: thin; scrollbar-color: var(--color-edge) transparent; }
