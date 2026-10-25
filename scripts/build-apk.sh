@@ -8,7 +8,13 @@ cd "$ROOT/frontend"
 npm run build
 npx cap sync android
 cd android
-if [[ "${OS:-}" == "Windows_NT" ]]; then cmd.exe //c "gradlew.bat assembleDebug"; else ./gradlew assembleDebug; fi
+if [[ "${OS:-}" == "Windows_NT" ]]; then
+  # tools installed per-user in Phase 0 (ENVIRONMENT.md); a shell opened before that has no JAVA_HOME yet
+  LAD="$(cygpath -u "${LOCALAPPDATA:-}")"
+  [[ -n "${JAVA_HOME:-}" ]] || export JAVA_HOME="$(ls -d "$LAD"/nightway-tools/jdk17/jdk-17* | head -1)"
+  [[ -n "${ANDROID_HOME:-}" ]] || export ANDROID_HOME="$LAD/Android/Sdk"
+fi
+sh ./gradlew assembleDebug
 APK="$ROOT/frontend/android/app/build/outputs/apk/debug/app-debug.apk"
 echo
 echo "APK: $APK"

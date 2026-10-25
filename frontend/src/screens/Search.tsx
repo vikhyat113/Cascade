@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
 import { useT } from "../copy";
+import { call } from "../lib/engine";
 import { BackButton, Sheet } from "../components/ui";
 import type { Place } from "../types";
 
@@ -18,7 +18,7 @@ export function Search({ field, onBack, onChoose, onPickMap, onHeight }: {
   useEffect(() => {
     window.clearTimeout(timer.current);
     if (q.trim().length < 2) { setHits(null); return; }
-    timer.current = window.setTimeout(() => api.geocode(q).then(setHits).catch(() => setHits([])), 200);
+    timer.current = window.setTimeout(() => call("geocode", q).then(setHits).catch(() => setHits([])), 200);
   }, [q]);
 
   return (

@@ -53,7 +53,7 @@ export function BackButton({ onClick }: { onClick: () => void }) {
 }
 
 /** Live / Offline pill: the only thing at the top of the screen. */
-export function Pill({ connection }: { connection: "live" | "offline" }) {
+export function Pill({ connection, long = false }: { connection: "live" | "offline"; long?: boolean }) {
   const { t } = useT();
   const live = connection === "live";
   return (
@@ -61,7 +61,7 @@ export function Pill({ connection }: { connection: "live" | "offline" }) {
       <div role="status" aria-live="polite"
         className="flex min-h-9 items-center gap-2 rounded-full border border-edge bg-surface/95 px-4 text-[0.95rem] font-semibold">
         <span className={`inline-block h-2.5 w-2.5 rounded-full ${live ? "bg-good" : "bg-soft"}`} aria-hidden="true" />
-        {live ? t("label.live") : t("line.offlineSaved")}
+        {live ? t("label.live") : long ? t("line.offlineSaved") : t("label.offline")}
       </div>
     </div>
   );

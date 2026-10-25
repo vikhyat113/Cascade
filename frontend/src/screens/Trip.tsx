@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
 import { useT } from "../copy";
+import { call } from "../lib/engine";
 import { PLACE_ICON, STATE, STEP_ICON } from "../components/icons";
 import { BigButton, QuietButton, Sheet } from "../components/ui";
 import type { Option, Place, PlaceOnWay, Trip as TripState } from "../types";
@@ -37,12 +37,11 @@ export function Trip({ option, trip, onHelp, onEnd, onBackup, showDemo, onDemo, 
 }
 
 /** Help: Call 112, nearest hospital / police (with a way there), share the trip. */
-export function HelpSheet({ at, planId, onClose, onGo }: { at: Place; planId: string | null; onClose: () => void; onGo: (p: PlaceOnWay) => void }) {
+export function HelpSheet({ at, onClose, onGo }: { at: Place; onClose: () => void; onGo: (p: PlaceOnWay) => void }) {
   const { t, lang } = useT();
   const [near, setNear] = useState<{ hospital: PlaceOnWay | null; police: PlaceOnWay | null } | null>(null);
-  const [copied, setCopied] = useState(false);
   useEffect(() => {
-    api.sos(at, lang).then(setNear).catch(() => setNear({ hospital: null, police: null }));
+    call("help", at.lat, at.lon).then(setNear).catch(() => setNear({ hospital: null, police: null }));
   }, [at, lang]);
   const row = (label: string, p: PlaceOnWay | null | undefined) => (
     <div className="rounded-2xl bg-raised p-3">
@@ -59,14 +58,6 @@ export function HelpSheet({ at, planId, onClose, onGo }: { at: Place; planId: st
       ) : <p className="mt-1 text-soft">{near ? t("line.nothingOpen") : "…"}</p>}
     </div>
   );
-  const share = async () => {
-    if (!planId) return;
-    try {
-      const r = await api.share(planId);
-      await navigator.clipboard?.writeText(`${window.location.origin}${r.url}`);
-    } catch { /* clipboard blocked: still say it is only a demo */ }
-    setCopied(true);
-  };
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
       <div className="w-full max-w-[480px] space-y-2.5 rounded-t-3xl bg-surface p-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("label.help")}>
@@ -74,7 +65,6 @@ export function HelpSheet({ at, planId, onClose, onGo }: { at: Place; planId: st
         <a href="tel:112" className="flex min-h-14 w-full items-center justify-center rounded-2xl bg-help text-[1.25rem] font-bold text-white">📞 {t("label.call112")}</a>
         {row(t("label.nearestHospital"), near?.hospital)}
         {row(t("label.nearestPolice"), near?.police)}
-        {planId && <QuietButton className="w-full" onClick={share}>🔗 {copied ? t("line.linkCopied") : t("label.shareTrip")}</QuietButton>}
         <QuietButton className="w-full" onClick={onClose}>{t("label.close")}</QuietButton>
       </div>
     </div>

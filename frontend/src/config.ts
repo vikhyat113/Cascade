@@ -77,6 +77,7 @@ export const CONFIG = {
     stepS: 30,                // fast-forward step
   },
   live: {
+    weatherUrl: "https://api.open-meteo.com/v1/forecast",
     weatherProbeEveryS: 900,  // real Open-Meteo probe when online
     weatherProbeOkS: 1800,    // pill says Live if the last probe is newer than this
   },

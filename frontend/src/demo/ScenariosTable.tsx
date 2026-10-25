@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { THEME } from "../theme";
 import { demo, OFFICIAL, type ScenarioResult } from "./demoApi";
 
 function Spark({ values }: { values: number[] }) {
@@ -6,12 +7,12 @@ function Spark({ values }: { values: number[] }) {
   const pts = values.map((v, i) => `${(i / (values.length - 1)) * 100},${30 - v * 28}`).join(" ");
   return (
     <svg viewBox="0 0 100 32" className="h-8 w-24" aria-label="confidence over time" preserveAspectRatio="none">
-      <polyline points={pts} fill="none" stroke="#8b7cff" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+      <polyline points={pts} fill="none" stroke={THEME.color.accent} strokeWidth="2" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
 
-/** Stress-harness results (scripts/run_scenarios.py) with a Run button. */
+/** Stress-harness results (src/engine/scenarios.ts, run on the phone) with a Run button. */
 export function ScenariosTable() {
   const [list, setList] = useState<{ id: string; name: string; description: string }[]>([]);
   const [res, setRes] = useState<Record<string, ScenarioResult>>({});

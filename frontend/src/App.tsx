@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "./api";
 import { useT, type CopyKey } from "./copy";
+import type { TripAsk } from "./engine/worker";
 import { MapCanvas } from "./components/MapCanvas";
 import { BackButton, Banner, Pill } from "./components/ui";
-import { useConnection } from "./lib/connection";
+import { call, listen } from "./lib/engine";
+import { useLive } from "./lib/live";
 import { lastTrip, loadPlace, myLocation, rememberTrip, savePlace } from "./lib/saved";
 import { Home, NEEDS } from "./screens/Home";
 import { OpenNow } from "./screens/OpenNow";
@@ -12,7 +13,7 @@ import { Search } from "./screens/Search";
 import { HelpSheet, Trip } from "./screens/Trip";
 import type { AppConfig, LatLon, Place, PlaceOnWay, SimpleView } from "./types";
 
-// Judges only: code-split, never in the first download (UI_SPEC §1.9, §5).
+// Judges only: code-split, never in the first download (spec §11).
 const DemoDrawer = lazy(() => import("./demo/DemoDrawer"));
 const ScenariosPage = lazy(() => import("./demo/ScenariosPage"));
 const SHOW_DEMO = import.meta.env.VITE_SHOW_DEMO === "true";
@@ -51,47 +52,46 @@ function Main() {
   const [bannerId, setBannerId] = useState<string | null>(null);
   const [demoOpen, setDemoOpen] = useState(false);
   const seen = useRef(new Set<string>());
-  const conn = useConnection(view?.connection ?? null);
+  const ask = useRef<TripAsk | null>(null);
+  const conn = useLive(cfg?.center ?? null);
 
-  // ---- boot --------------------------------------------------------------------------------
+  // ---- boot: the engine loads the bundled city; a trip this phone already started carries on ----------
   useEffect(() => {
     let stop = false;
-    const boot = () => api.config().then(async (c) => {
-      if (stop) return;
-      setCfg(c);
-      setHome(loadPlace("home", c.ui_defaults));
-      setWork(loadPlace("work", c.ui_defaults));
-      setBy(c.ui_defaults.deadline);
-      setFrom(await myLocation(c.ui_defaults, c.center, c.radius_m));
-      // a shared link, or a trip this phone already started: carry on with it (from cache if no signal)
-      const trip = new URLSearchParams(window.location.search).get("trip") || lastTrip();
-      if (trip) {
-        api.getPlan(trip, lang).then((v) => {
-          if ((v as unknown as { offline?: boolean }).offline || !v.options) return;
-          setView(v);
-          setShownId(v.current_option_id || "safest");
-          setScreen("trip");
-        }).catch(() => rememberTrip(null));
+    (async () => {
+      try {
+        const c = await call("init");
+        if (stop) return;
+        setCfg(c);
+        setHome(await loadPlace("home", c.ui_defaults));
+        setWork(await loadPlace("work", c.ui_defaults));
+        setBy(c.ui_defaults.deadline);
+        setFrom(await myLocation(c.ui_defaults, c.center, c.radius_m));
+        const saved = await lastTrip();
+        if (!saved || stop) return;
+        let v = await call("plan", saved.ask);
+        if (!v?.options.length) { rememberTrip(null); return; }
+        ask.current = saved.ask;
+        const opt = v.options.find((o) => o.id === saved.option);
+        if (saved.started && opt) v = (await call("choose", opt.plan_id)) ?? v;
+        if (v.banner) seen.current.add(v.banner.id);
+        setFrom({ ...saved.ask.from, kind: saved.ask.from.kind ?? null });
+        setTo({ ...saved.ask.to, kind: saved.ask.to.kind ?? null });
+        setWhen(saved.ask.when);
+        setBy(saved.ask.by);
+        setView(v);
+        setShownId(v.current_option_id || saved.option);
+        setScreen(saved.started ? "trip" : "result");
+      } catch {
+        if (!stop) setError(t("line.noWay"));
       }
-    }).catch(() => { if (!stop) { setError(t("line.noSignal")); window.setTimeout(boot, 3000); } });
-    boot();
+    })();
     return () => { stop = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- live updates: SSE, falling back to polling -----------------------------------------------
-  useEffect(() => {
-    if (!view?.id) return;
-    const id = view.id;
-    let poll: number | undefined;
-    api.getPlan(id, lang).then(setView).catch(() => {});        // re-word immediately on language change
-    const es = new EventSource(`/api/plan/${id}/stream?lang=${lang}`);
-    es.addEventListener("plan_update", (e) => setView(JSON.parse((e as MessageEvent).data)));
-    es.onerror = () => {
-      es.close();
-      if (!poll) poll = window.setInterval(() => api.getPlan(id, lang).then(setView).catch(() => {}), 4000);
-    };
-    return () => { es.close(); if (poll) window.clearInterval(poll); };
-  }, [view?.id, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ---- live updates: the engine pushes a fresh view on every tick; words follow the language ----------
+  useEffect(() => listen((m) => { if (m.type === "view") setView(m.view); }), []);
+  useEffect(() => { call("setLang", lang).catch(() => {}); }, [lang]);
 
   // ---- one banner at a time, each shown once ---------------------------------------------------
   useEffect(() => {
@@ -114,42 +114,40 @@ function Main() {
     setBusy(true);
     setError(null);
     try {
-      const v = await api.plan(from, dest, when, by, lang);
-      if (view?.id) api.drop(view.id);
+      const a: TripAsk = { from, to: dest, when, by };
+      const v = await call("plan", a);
+      if (!v || !v.options.length) { setError(v?.error_text || t("line.noWay")); setScreen("home"); return; }
       if (v.banner) seen.current.add(v.banner.id);
-      if (!v.options.length) { setError(v.error_text || t("line.noWay")); setScreen("home"); return; }
+      ask.current = a;
+      rememberTrip({ ask: a, option: "safest", started: false });
       setView(v);
       setShownId("safest");
       setShowPlaces(false);
       setScreen("result");
     } catch {
-      const last = lastTrip();                                    // no server: keep going on saved info
-      if (last) {
-        try { const v = await api.getPlan(last, lang); setView(v); setScreen("trip"); return; } catch { /* nothing saved */ }
-      }
-      setError(navigator.onLine ? t("line.noWay") : t("line.noSignal"));
+      setError(t("line.noWay"));
       setScreen("home");
     } finally {
       setBusy(false);
     }
-  }, [from, to, when, by, lang, view?.id, t]);
+  }, [from, to, when, by, t]);
 
   const start = async () => {
     if (!view || !shown) return;
     setStarting(true);
     try {
-      const v = await api.choose(view.id, shown.plan_id, lang);
-      setView(v);
-      setShownId(v.current_option_id || shown.id);
-      rememberTrip(v.id);
-    } catch { /* offline: carry on with what we have */ }
+      const v = await call("choose", shown.plan_id);
+      if (v) { setView(v); setShownId(v.current_option_id || shown.id); }
+      if (ask.current) rememberTrip({ ask: ask.current, option: v?.current_option_id || shown.id, started: true });
+    } catch { /* carry on with what we have */ }
     setStarting(false);
     setScreen("trip");
   };
 
   const endTrip = () => {
-    if (view?.id) api.drop(view.id);
+    call("endTrip").catch(() => {});
     rememberTrip(null);
+    ask.current = null;
     setView(null);
     setScreen("home");
   };
@@ -161,10 +159,10 @@ function Main() {
     setNeed(base);
     setScreen("opennow");
     try {
-      const r = await api.needNow(type, from, lang);
-      setNeed({ ...base, places: r.places, empty: r.empty_text });
+      const places = await call("needNow", type, from.lat, from.lon);
+      setNeed({ ...base, places, empty: places.length ? null : t("line.nothingOpen") });
     } catch {
-      setNeed({ ...base, places: [], empty: t("line.noSignal") });
+      setNeed({ ...base, places: [], empty: t("line.nothingOpen") });
     }
   };
 
@@ -215,7 +213,7 @@ function Main() {
 
   if (!cfg) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center" role="status">
         <span className="text-[2.5rem]" aria-hidden="true">🌙</span>
         <p className="text-[1.2rem] font-semibold">{error || t("line.finding")}</p>
       </div>
@@ -225,12 +223,12 @@ function Main() {
   const demo = { showDemo: SHOW_DEMO, onDemo: () => setDemoOpen(true) };
   return (
     <div className="relative h-full overflow-hidden">
-      <MapCanvas center={cfg.center} bottomPad={sheetH} offline={conn === "offline"} {...mapView}
+      <MapCanvas center={cfg.center} bottomPad={sheetH} {...mapView}
         onPick={screen === "pick" ? async (lat, lon) => {
-          const name = await api.where(lat, lon, lang).then((r) => r.name).catch(() => t("label.pickedPoint"));
+          const name = (await call("where", lat, lon).catch(() => null)) || t("label.pickedPoint");
           choosePlace({ lat, lon, name }, field === "to" ? pickSave : null);
         } : null} />
-      <Pill connection={conn} />
+      <Pill connection={conn} long={screen === "trip"} />
       {banner && <Banner id={banner.id} text={banner.text} onDone={() => setBannerId(null)}
         onSee={() => { if (banner.see_option_id) setShownId(banner.see_option_id); }} />}
 
@@ -263,7 +261,7 @@ function Main() {
         <OpenNow title={need.title} places={need.places} empty={need.empty} onBack={() => setScreen("home")}
           onPick={goTo} onHeight={setSheetH} />
       )}
-      {helpAt && <HelpSheet at={helpAt} planId={view?.id ?? null} onClose={() => setHelpAt(null)} onGo={goTo} />}
+      {helpAt && <HelpSheet at={helpAt} onClose={() => setHelpAt(null)} onGo={goTo} />}
 
       <Suspense fallback={null}>
         {demoOpen && <DemoDrawer view={view} onClose={() => setDemoOpen(false)} />}

@@ -90,7 +90,7 @@ export class FeedSimulator {
       if (tr.rain) {
         // demo rain is a simulated observation (labelled synthetic)
         s.put(this.fact(sid, "weather:now", { rain_class: tr.rain, rain_mm: RAIN_MM[tr.rain], precip_prob: 100 }, obs, true, "simulated rain (demo)"));
-      } else if (real && real.observedAt && now - real.observedAt < 1800000) {
+      } else if (real && real.observedAt != null && now - real.observedAt >= 0 && now - real.observedAt < 1800000) {   // only when the app clock is near real time
         s.put({ ...real, key: "weather:now", observedAt: Math.max(real.observedAt, obs - 60000) });   // real Open-Meteo reading
       } else {
         const row = w.weatherRows.get(w.city.hourKey(now)) ?? {};
