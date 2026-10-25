@@ -8,7 +8,7 @@ import { SheetFooter } from "./Home";
 export function Steps({ steps }: { steps: Step[] }) {
   const { t } = useT();
   return (
-    <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2" aria-label="steps">
+    <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2" aria-label={t("label.steps")}>
       {steps.map((s, i) => (
         <Fragment key={i}>
           {i > 0 && <li aria-hidden="true" className="text-soft">→</li>}
@@ -34,7 +34,7 @@ export function WarningLine({ option, onBackup }: { option: Option; onBackup: (i
       {w && (
         <p className="flex-1 text-[1.02rem] font-semibold text-warn">
           <span aria-hidden="true">⚠️ </span>{w.text}
-          {w.pill && <span className="ml-2 rounded-full border border-warn/60 px-2 py-0.5 text-[0.85rem]">{w.pill}</span>}
+          {w.pill && <span className="ml-2 inline-block whitespace-nowrap rounded-full border border-warn/60 px-2 py-0.5 text-[0.85rem]">{w.pill}</span>}
         </p>
       )}
       {!w && <span className="flex-1" />}

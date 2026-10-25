@@ -1,149 +1,91 @@
-# NightWay: a night-time decision engine
+# NightWay: a safe way home at night (Android)
 
 **CASCADE '26 · Problem 1.1 "The City That Sleeps While You Work"**
 
-A night-shift worker says *"I finish at 2:15 AM and need to be home by 3:00."* NightWay returns the safest **feasible** plans (walk, night bus, cab), each with an arrival **range**, a safety **range**, best/expected/worst-case deadline checks, a Plan B and a one-line reason. It then **keeps re-planning** as data ages, feeds die, it rains or a road closes.
+A night-shift worker finishes at 2:15 AM and has to be home by 3:00. NightWay shows **one safe way home**, says plainly whether it will be **on time**, and **keeps checking** while they travel. That covers buses being cancelled, roads closing, rain and phone signal dropping. It works **with no internet**: the phone does all the thinking, on map data bundled in the app.
 
-Its core rule: **every fact is KNOWN, PROBABLE, OUTDATED or UNKNOWN, and nothing is ever invented.** Missing data widens ranges and triggers Plan B; it is never filled in.
+Its core rule: every fact the app uses is **Known, Probable, Outdated or Unknown**, and nothing is invented. Missing information makes the answer more careful (a wider time range, a warning, a Backup); it is never filled in.
 
-![Planner with live plans, data trust panel and night timeline](docs/screenshots/desktop.png)
+| Home | Result | Trip, offline | Help | Hindi |
+|---|---|---|---|---|
+| ![](docs/screenshots/app/home.png) | ![](docs/screenshots/app/result.png) | ![](docs/screenshots/app/trip-offline.png) | ![](docs/screenshots/app/help.png) | ![](docs/screenshots/app/result-hindi.png) |
 
-## Quick start
+## What the user sees
 
-Prerequisites: Python 3.11+ and Node 18+. The cached city data for Noida is in `data/`, so **no internet is needed** to run.
+- **Home**: From (GPS) / To (**Home**, **Work**), When, Be there by, then **Find a safe way**. Four quick buttons: Medicine, Food, Hospital, Police ("open now").
+- **Result**: tabs Safest / Balanced / Fastest, "Home by 2:29", **On time / Could be late / Too late**, **Safe / OK / Be careful** with a short reason, and icon steps. If something important is unsure, one short warning ("Bus time is a guess.") and a **Backup** button.
+- **Trip**: the next step in big text, a progress bar, one banner at a time ("Road ahead is closed. New way found."), and an always-visible red **Help** button.
+- **Help**: **Call 112**, three big buttons (*I'm in danger*, *I need a doctor*, *Not sure*), **Text my contact** (SMS with a map link). Progress in plain words: *Sending… → Passed on → Help is aware*, or *Not sure*.
+- **Safety timer**: "Tell my contact if I'm late" asks *Are you home?* 10 min after the deadline; no answer means an alert and a ready-to-send text.
+- English and Hindi (EN | हिं). No engineering words anywhere in the normal screens: a test fails the build if one appears.
 
-**Backend** (http://localhost:8000):
+## Install and run
+
+**On the phone**: the debug APK is `frontend/android/app/build/outputs/apk/debug/app-debug.apk`. Copy it to the phone and tap it to install. Allow "install unknown apps" for your file manager, and allow location when asked.
+
+**Build it yourself** (Node 18+, JDK 17, Android SDK 34; see [ENVIRONMENT.md](ENVIRONMENT.md)):
 ```bash
-cd backend
-python -m venv .venv && .venv/Scripts/pip install -r requirements.txt     # macOS/Linux: .venv/bin/pip
-.venv/Scripts/python -m uvicorn app.main:app --port 8000                 # one command after install
+cd frontend && npm install
+bash ../scripts/build-apk.sh                    # runs the tests, builds the web app, syncs Capacitor, assembles the APK
+powershell -ExecutionPolicy Bypass -File ../scripts/push-apk.ps1   # Windows: copy to the phone's Download folder over USB (no adb needed)
+bash ../scripts/build-apk.sh --install          # or, with USB debugging on: adb install
 ```
 
-**Frontend** (http://localhost:5173, proxies `/api` to :8000):
+**In Chrome** (fastest way to look around): `cd frontend && npm run dev`, then open http://localhost:5173 with a phone-sized window.
+
+**Dispatch server for the Help demo** (simulated police / hospital / contact desks):
 ```bash
-cd frontend
-npm install && npm run dev
+cd server && npm install && npm start           # prints http://<laptop Wi-Fi IP>:8787
 ```
+In the app, open **Demo → 8. Dispatch server**, enter that address and press **Save + test**. Phone and laptop must share a Wi-Fi network; on Windows, allow Node.js through the firewall. The dashboard is at http://localhost:8787.
 
-**Single port (for the demo machine):** run `npm run build` in `frontend/` once; the backend then serves the UI at http://localhost:8000 (the scenario results page is at `/scenarios`).
-
-**Tests and stress harness:**
-```bash
-cd backend && .venv/Scripts/python -m pytest -q          # 32 tests, ~3 s (freshness, hours, risk, planner)
-.venv/Scripts/python ../scripts/run_scenarios.py         # 8 deterministic scenarios + results table
-```
-
-Optional: copy `.env.example` to `.env` and set `GROQ_API_KEY` to enable LLM parsing of free text. Without it, the rule parser handles the same sentences.
-
-## What judges should look at
-
-| Feature | Where |
-|---|---|
-| KNOWN / PROBABLE / OUTDATED / UNKNOWN on every fact | Badges everywhere; hover a route segment on the map |
-| Data Trust panel (signature feature) | Right column: every source with status, age, reliability, REAL/SYNTHETIC tag, status strip and an outage toggle |
-| Graceful degradation | Simulation → *Kill traffic + bus realtime*, then *Kill ALL live data*, then *+15 min* |
-| Never inventing | Pharmacies without OSM hours show **UNKNOWN, hours unknown**, never "open"; the validator checks every output |
-| Ranges, not numbers | ETA `02:23–02:41`, safety `68–84`, risk breakdown bars |
-| Continuous re-planning with hysteresis | Change log: *"Kept current plan; … below the hysteresis threshold"* / *"Current plan broke (cab route crosses a closure (Amaltash Marg))"* |
-| Stress harness | `/scenarios` page or `scripts/run_scenarios.py`: 8/8 pass, 0 invalid outputs |
-
-See [DEMO.md](DEMO.md) for the 5-minute demo script.
+**Tests**: `cd frontend && npm test` runs 55 tests in about 15 s: freshness rules, opening hours, the planner on the real Noida data, the plain-words view, all 8 stress scenarios, copy rules, and the help ladder and mesh.
 
 ## How it works
 
-```mermaid
-flowchart LR
-  subgraph Cache["data/ (downloaded once, offline at runtime)"]
-    OSM["OSM walk + drive graphs<br/>(OSMnx packs)"]
-    POI["OSM POIs + opening hours<br/>(Overpass, with edit dates)"]
-    WX["Open-Meteo forecast"]
-    TT["Night timetable<br/>(synthetic, real stop locations)"]
-    INC["Incident history<br/>(synthetic, seeded)"]
-  end
-  subgraph Sim["Simulator (ground truth, hidden from planner)"]
-    TRUTH["Truth: rain, closures,<br/>cancellations, delays"]
-    FEEDS["Feed simulator<br/>delays · dropouts · outages"]
-  end
-  TRUTH --> FEEDS
-  FEEDS -->|"Facts (observed)"| STORE[("Fact store")]
-  Cache -->|"Facts (observed / scheduled / inferred / prior)"| STORE
-  STORE --> FRESH["Freshness engine<br/>status + confidence decay"]
-  FRESH --> RISK["Risk scorer<br/>6 components as [lo, hi]"]
-  FRESH --> PLAN["Planner<br/>candidates → forward-in-time eval<br/>→ robust selection + Plan B"]
-  RISK --> PLAN
-  PLAN --> REPLAN["Re-planner<br/>hysteresis + change log"]
-  CLOCK["Sim clock"] --> FEEDS & REPLAN
-  REPLAN -->|"SSE plan_update"| UI["React UI<br/>map · cards · trust panel · timeline"]
-  FRESH -->|"/api/trust"| UI
-  VAL["Validator: UNKNOWN never carries a value"] -.-> PLAN
+```
+frontend/src/
+  engine/      TypeScript decision engine, runs in a Web Worker on the phone
+    freshness.ts   Known / Probable / Outdated / Unknown, confidence decay, weakest-link aggregation
+    sim/           seeded feeds (traffic, bus positions, closures, weather) with delays and dropouts; demo events
+    planner.ts     walk / bus / cab candidates at several risk weights; best / expected / worst arrival; safety as a range
+    replanner.ts   re-plans every tick, with hysteresis so the plan doesn't flip; logs every change with its reason
+    simpleView.ts  the only thing the screens render: plain words, no numbers except times, minutes, metres
+    scenarios.ts   8 deterministic stress scenarios (bus cancelled, road closed, all live info lost, ...)
+  sos/         help ladder, dispatch client, simulated mesh, safety timer
+  copy/        every word (en.ts, hi.ts) + the banned-word / length test
+  theme.ts     every colour and size        config.ts   every threshold and weight
+  data/        the city, built by tools/build_data.py (OSM + Open-Meteo), about 1.3 MB
+server/        demo dispatch server (Node + Express, one file)
+backend/       the original Python engine, kept as the reference (same 8 scenarios); not shipped
+legacy/        replaced code and earlier specs (see AUDIT.md)
 ```
 
-1. **Facts.** Everything the planner uses is a `Fact {value, source, synthetic, observed_at, ttl_s, reliability, kind}` ([facts.py](backend/app/core/facts.py)).
-2. **Freshness.** `status(fact, now)` applies SPEC §5: observed and fresh = KNOWN; stale ≤ 3×TTL, timetable, inference or prior = PROBABLE; older or contradicted = OUTDATED; missing or > 10×TTL = **UNKNOWN, value stripped** ([freshness.py](backend/app/core/freshness.py)). Confidence decays smoothly. Aggregation is weakest-link status plus a confidence product.
-3. **Risk.** Lighting, incidents, isolation, traffic/closures, weather and emergency access are each an interval per street edge. UNKNOWN inputs add **width**, not a value. For example, unknown lighting is `[0.25, 0.9]`, and unknown weather is `[0, 0.7]` ([risk.py](backend/app/core/risk.py)).
-4. **Planner.** It builds walk paths at several risk weights (λ), cab routes, and bus/metro options via board/alight stops, then simulates each **forward in time** as best/expected/worst triples. It picks from the worst-case-feasible pool by robust (worst-case) safety, labels Fastest/Safest/Balanced, and builds a Plan B that avoids the recommended plan's weakest dependency ([planner.py](backend/app/core/planner.py)).
-5. **Live loop.** Every tick the sim clock advances, feeds emit (or don't), facts age, and every active plan is re-planned. The re-planner only switches with a reason (hysteresis) and logs every transition ([replanner.py](backend/app/core/replanner.py)).
+- **Offline first**: the map is drawn from the bundled road network (no tiles), places and opening hours are bundled, and the weather forecast is a saved snapshot. With no signal, the app says **"Offline: using saved info"**, live information stops arriving, facts age (Known → Probable → Outdated → Unknown), and plans become more careful instead of breaking.
+- **Live**: when online, a real Open-Meteo reading is fetched every 15 min; the pill shows **Live**.
+- **Saved on the phone** (Capacitor Preferences): Home, Work, language, the last trip (a started trip carries on after a restart), the dispatch address.
 
-## Data: what is real and what is synthetic
+## Real vs simulated
 
-| Data | Source | Status in the app |
-|---|---|---|
-| Street network (walk 844 km, drive 1,205 km) | OpenStreetMap via OSMnx (real) | KNOWN (map) |
-| Street lighting | OSM `lit` + street lamps (real, covers 2.5 %); main-road prior; otherwise unknown | KNOWN / PROBABLE / **UNKNOWN** |
-| 371 facilities + opening hours | OSM via Overpass (real; hours on 35 of them) | KNOWN / PROBABLE (category prior) / OUTDATED (old tags) / **UNKNOWN** |
-| Weather forecast | Open-Meteo (real, cached) | PROBABLE (forecast) |
-| Live weather observations | simulated around the real forecast | **SYNTHETIC** |
-| Night bus + metro timetable | hand-built on real OSM stop locations | **SYNTHETIC**, PROBABLE |
-| Bus realtime, traffic speeds, closures, cab availability, incident reports | feed simulator | **SYNTHETIC** |
-| Incident history | seeded generator biased by OSM proxies | **SYNTHETIC** |
+| Real | Simulated (marked `synthetic: true` in the code; only the Demo drawer says so) |
+|---|---|
+| Streets, footpaths, street lamps / `lit` tags (OpenStreetMap) | Traffic speeds |
+| Hospitals, police, pharmacies, shops, opening hours (OpenStreetMap) | Live bus positions, cancellations |
+| Bus-stop locations (OpenStreetMap) | Night bus timetable (no open feed exists for Noida) |
+| Weather forecast snapshot + live current weather (Open-Meteo) | Road closures, accidents, waterlogging |
+| Phone GPS, SMS and phone calls (the user sends them) | Incident history (seeded, biased by real map features) |
+| | Cab waiting times |
+| | Police / hospital / contact desks (`server/`), mesh of nearby phones |
 
-Credits: © OpenStreetMap contributors (ODbL) · Weather data by Open-Meteo.com (CC BY 4.0) · map tiles © OpenStreetMap (light use).
+**Help is a demo**: the dispatch server is not connected to any emergency service. *Call 112* is the real path and is always on screen. Area: Noida, 4 km around Sector 18.
 
-**Switching city:** edit `city_name`, `center`, `radius_m` and the `personas` place names in [backend/config.yaml](backend/config.yaml), then run `backend/.venv/Scripts/pip install -r requirements-data.txt` and `python scripts/fetch_all.py` (Overpass + OSMnx + Open-Meteo, a few minutes).
+## Honest limits
 
-## API
+- The safety score is a careful estimate from open data. About 97 % of street length has no lighting information, so the app never calls a street lit unless the map says so; unknown lighting only widens the safety range.
+- Cab routes ignore one-way streets (small error on a 4 km area); transfers between buses are not planned.
+- The mesh is a simulation of 6 phones. Real Bluetooth relaying (Phase 7) is off and not verified.
+- Hindi copy was written for this build and should be reviewed by a native speaker before real users see it.
 
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/plan` | Create a plan set `{origin, destination, finish_time, deadline, persona, prefs}` |
-| GET | `/api/plan/{id}` · `/api/plan/{id}/stream` | Current plan set · SSE `plan_update` events with change log |
-| POST | `/api/nl/parse` | Free text → structured request (Groq if keyed, rules otherwise) |
-| GET | `/api/trust` | All sources: status, age, reliability, synthetic flag, history, coverage |
-| POST | `/api/sim/outage` | `{source, enabled}` (`all_live`, `all`, or a source id) |
-| POST | `/api/sim/clock` | `{speed, paused, time, advance_s}` |
-| POST | `/api/sim/inject` | Ground-truth events: rain, fog, road_closure, accident, bus_cancelled, schedule_conflict, cab_shortage, incident |
-| POST | `/api/sim/scenario/{id}/run` · `/api/scenarios/run_all` | Scenario replay |
-| GET | `/api/need-now?type=pharmacy&lat=&lon=&time=` | Nearest place open on arrival, with safe route and confidence |
-| GET | `/api/heatmap?hour=2` | Night safety grid (GeoJSON) |
-| POST | `/api/sos` · `/api/share` | Simulated SOS / trusted-contact share |
-| GET | `/api/health` | Liveness + data version |
+More: [DEMO.md](DEMO.md) (3-minute demo script), [ASSUMPTIONS.md](ASSUMPTIONS.md) (every decision and why), [PROGRESS.md](PROGRESS.md), [AUDIT.md](AUDIT.md).
 
-## Repo layout
-
-```
-backend/
-  app/main.py                FastAPI app + live loop (serves frontend/dist if built)
-  app/api/routes.py          HTTP + SSE endpoints
-  app/core/                  facts, freshness, clock, world (static data), state (live),
-                             risk, services (open-now), planner, replanner, needs, heatmap,
-                             nlp, validate, transit, cab, engine
-  app/core/sim/              feeds (live feed simulator), events (injections), scenarios
-  app/adapters/              osm (graph packs + routing), overpass (POIs), weather,
-                             traffic_sim, incidents_sim, geo
-  config.yaml                city, sources (TTL, reliability), risk weights, planner, personas
-  tests/                     pytest on a synthetic 7x7 grid city
-frontend/src/                React app (components/, api.ts, types.ts)
-data/                        cached city data (compact, committed)
-scenarios/                   8 scenario JSON files
-scripts/                     fetch_*.py, build_transit.py, gen_incidents.py, fetch_all.py,
-                             run_scenarios.py, record_demo.py
-```
-
-More detail: [ASSUMPTIONS.md](ASSUMPTIONS.md) (every judgement call), [SPEC.md](SPEC.md) (the brief), [DEMO.md](DEMO.md) (demo script).
-
-## Troubleshooting
-
-* **"Waiting for the engine…"** in the UI means the backend isn't running on :8000.
-* **Map area is blank** means the browser has WebGL disabled. Everything else still works; enable hardware acceleration.
-* **Overpass busy** when fetching a new city: the scripts retry with backoff across the mirrors in `config.yaml`.
-* **The clock already says 03:00**: use *Reset simulation* in the Simulation panel. The clock starts paused at 02:00 and runs from the first plan.
+Map data © OpenStreetMap contributors (ODbL). Weather data by Open-Meteo.com (CC BY 4.0).

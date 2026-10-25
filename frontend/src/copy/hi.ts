@@ -134,6 +134,17 @@ export const hi: Record<CopyKey, string> = {
   "fmt.smsHelp": "मुझे मदद चाहिए। मैं यहाँ हूँ: {link}",
   "fmt.smsLate": "अभी घर नहीं पहुँचा। मैं यहाँ हूँ: {link}",
 
+  "label.about": "जानकारी",
+  "label.appName": "NightWay",
+  "label.language": "भाषा",
+  "label.map": "नक्शा",
+  "label.steps": "कदम",
+  "line.aboutWhat": "रात में घर का सुरक्षित रास्ता।",
+  "line.aboutOffline": "बिना सिग्नल भी, सेव की जानकारी से।",
+  "line.call112Always": "खतरे में? हमेशा 112 पर कॉल करें।",
+  "line.mapCredit": "नक्शा डेटा © OpenStreetMap contributors",
+  "line.weatherCredit": "मौसम: Open-Meteo.com",
+
   "reason.lit": "रोशनी वाली सड़कें",
   "reason.mainRoads": "मुख्य सड़कें",
   "reason.shopsOpen": "रास्ते में दुकानें खुली",

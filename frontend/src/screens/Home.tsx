@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useT } from "../copy";
 import { Chevron } from "../components/icons";
-import { BigButton, Sheet } from "../components/ui";
+import { BigButton, QuietButton, Sheet } from "../components/ui";
 import type { Place } from "../types";
 
 export const NEEDS = [
@@ -23,14 +23,16 @@ export function Field({ label, value, onClick, empty }: { label: string; value: 
 
 export function SheetFooter({ showDemo, onDemo }: { showDemo: boolean; onDemo: () => void }) {
   const { lang, setLang, t } = useT();
+  const [about, setAbout] = useState(false);
+  const quiet = "min-h-11 rounded-xl px-2 text-[0.95rem] font-semibold text-soft underline-offset-4 hover:underline";
   return (
-    <div className="mt-4 flex items-center justify-between">
-      {showDemo ? (
-        <button onClick={onDemo} className="min-h-11 rounded-xl px-2 text-[0.95rem] font-semibold text-soft underline-offset-4 hover:underline">
-          {t("label.demo")}
-        </button>
-      ) : <span />}
-      <div className="flex items-center rounded-xl border border-edge text-[0.95rem] font-semibold" role="group" aria-label="Language">
+    <div className="mt-4 flex items-center justify-between gap-2">
+      <div className="flex items-center gap-1">
+        {showDemo && <button onClick={onDemo} className={quiet}>{t("label.demo")}</button>}
+        <button onClick={() => setAbout(true)} className={quiet}>{t("label.about")}</button>
+      </div>
+      {about && <About onClose={() => setAbout(false)} />}
+      <div className="flex items-center rounded-xl border border-edge text-[0.95rem] font-semibold" role="group" aria-label={t("label.language")}>
         {(["en", "hi"] as const).map((l) => (
           <button key={l} onClick={() => setLang(l)} aria-pressed={lang === l}
             className={`min-h-11 min-w-12 px-3 ${lang === l ? "rounded-xl bg-raised text-ink" : "text-soft"}`}>
@@ -119,6 +121,24 @@ function TimeSheet({ title, value, clearLabel, onDone, onCancel }: {
           <button onClick={() => onDone(null)} className="min-h-14 rounded-2xl border border-edge bg-raised font-semibold">{clearLabel}</button>
           <BigButton onClick={() => onDone(v || null)}>{t("label.done")}</BigButton>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** About: what the app does, and credits for the open data it uses (spec §4). */
+function About({ onClose }: { onClose: () => void }) {
+  const { t } = useT();
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+      <div className="w-full max-w-[480px] space-y-3 rounded-t-3xl bg-surface p-5 text-[1.05rem]" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("label.about")}>
+        <h2 className="text-[1.5rem] font-bold">🌙 {t("label.appName")}</h2>
+        <p>{t("line.aboutWhat")}</p>
+        <p>{t("line.aboutOffline")}</p>
+        <p className="font-semibold text-help">{t("line.call112Always")}</p>
+        <p className="text-soft"><a className="inline-flex min-h-11 items-center underline underline-offset-4" href="https://www.openstreetmap.org/copyright">{t("line.mapCredit")}</a></p>
+        <p className="text-soft"><a className="inline-flex min-h-11 items-center underline underline-offset-4" href="https://open-meteo.com/">{t("line.weatherCredit")}</a></p>
+        <QuietButton className="w-full" onClick={onClose}>{t("label.close")}</QuietButton>
       </div>
     </div>
   );

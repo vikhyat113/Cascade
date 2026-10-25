@@ -35,6 +35,15 @@
 - Fixed: toggles were usable before their state loaded (a tap could flip the wrong way); quick "+5 min" taps raced and reset the night.
 - Browser run at 360 px (quality gates): 2:15 AM in daytime → fresh plan "On time"; Road closed → one plain banner; All live info off + 15 min → plan kept, pill "Offline: using saved info", "Traffic info is old." + Backup, no banned words; scenarios 8/8 in ~10 s; no console errors.
 
+## Phase 6: polish and release (done, tag phase-6, feature freeze)
+- About screen with OpenStreetMap / Open-Meteo credits; remaining English accessibility labels moved into the copy deck (Hindi too).
+- Audit at 360 px, English and Hindi, normal and 130 % font, on Home / About / Result / Trip / Help: no sideways scrolling, nothing cut off, every control named, every tap target ≥ 44 px, no banned words, no page errors.
+- Fixed: "Old info" pill wrapping; a warning + Backup still shown after "You have arrived."
+- README.md and DEMO.md rewritten for the Android app (old ones in `legacy/`). Screenshots in `docs/screenshots/app/`.
+- Final APK: `frontend/android/app/build/outputs/apk/debug/app-debug.apk` (7 MB), built with the dispatch URL `http://192.168.105.248:8787` (this laptop's Wi-Fi address today; change it in Demo → 8 if it moves). Copied to the phone's Download folder.
+- **Unverified on the phone**: notification prompt, SMS/tel intents, phone → laptop over Wi-Fi.
+- Known gaps: the result screen shows about 35 words with the late-alert switch on (spec: about 25); scenario results show "age 0 s" for data newer than a clock set back in the Demo drawer.
+
 ## Commands
 - Tests: `cd frontend && npm test` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 
@@ -42,4 +51,4 @@
 - `cd server && npm install && npm start`, then put the printed Wi-Fi address in Demo → 8. Dispatch server.
 
 ## Next
-- Phase 6: polish, 360px / large font / Hindi checks, accessibility labels, README, DEMO.md, final APK.
+- Phase 7 (optional, time-boxed 2 h): real Bluetooth relay behind `MESH_REAL` (off). Needs two Android phones to verify.

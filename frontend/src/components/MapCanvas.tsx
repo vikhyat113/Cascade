@@ -1,6 +1,7 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useRef } from "react";
+import { useT } from "../copy";
 import { call } from "../lib/engine";
 import { THEME } from "../theme";
 import type { LatLon, PlaceOnWay } from "../types";
@@ -54,6 +55,7 @@ export function MapCanvas({ center, path, start, end, me, places, fitKey, bottom
   const layer = useRef<L.LayerGroup | null>(null);
   const pickRef = useRef(onPick);
   pickRef.current = onPick;
+  const { t } = useT();
 
   useEffect(() => {
     if (!box.current) return;
@@ -104,5 +106,5 @@ export function MapCanvas({ center, path, start, end, me, places, fitKey, bottom
   }, [fitKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // `isolate` + z-0: Leaflet panes use z-index 400+; keep them below the sheet, pill and banner.
-  return <div ref={box} className="absolute inset-0 isolate z-0" style={{ cursor: onPick ? "crosshair" : undefined }} role="img" aria-label="map" />;
+  return <div ref={box} className="absolute inset-0 isolate z-0" style={{ cursor: onPick ? "crosshair" : undefined }} role="img" aria-label={t("label.map")} />;
 }

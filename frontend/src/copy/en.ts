@@ -134,6 +134,17 @@ export const en = {
   "fmt.smsHelp": "I need help. I am here: {link}",
   "fmt.smsLate": "Not home yet. I am here: {link}",
 
+  "label.about": "About",
+  "label.appName": "NightWay",
+  "label.language": "Language",
+  "label.map": "Map",
+  "label.steps": "Steps",
+  "line.aboutWhat": "Finds a safe way home at night.",
+  "line.aboutOffline": "Works without signal, using saved info.",
+  "line.call112Always": "In danger? Always call 112.",
+  "line.mapCredit": "Map data © OpenStreetMap contributors",
+  "line.weatherCredit": "Weather by Open-Meteo.com",
+
   "reason.lit": "lit roads",
   "reason.mainRoads": "main roads",
   "reason.shopsOpen": "shops open on the way",

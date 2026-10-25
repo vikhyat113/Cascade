@@ -25,7 +25,7 @@ export function Trip({ option, trip, onHelp, onEnd, onBackup, showDemo, onDemo, 
         <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-raised" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
           <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${pct}%` }} />
         </div>
-        <WarningLine option={option} onBackup={onBackup} />
+        {!trip?.arrived && <WarningLine option={option} onBackup={onBackup} />}
         <div className="mt-4"><BigButton tone="help" onClick={onHelp}>🆘 {t("label.help")}</BigButton></div>
         <div className="mt-2.5"><QuietButton className="w-full" onClick={onEnd}>{t("label.endTrip")}</QuietButton></div>
         <SheetFooter showDemo={showDemo} onDemo={onDemo} />
