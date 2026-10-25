@@ -30,6 +30,11 @@
 - Tests: 55 in total (8 new: ladder, mesh, timer times). Browser run at 360 px: direct help → ack → "Help is aware"; mesh help (3 hops) → ack; timer → Contact desk alert + SMS offered; no console errors.
 - **Unverified on the phone**: notification permission prompt, SMS/tel intents, reaching the laptop over Wi-Fi (Windows firewall must allow Node).
 
+## Phase 5: Demo drawer and scenarios (done, tag phase-5)
+- Drawer in spec order: 1 Break things · 2 Make it happen · 3 Time (**Set to 2:15 AM**, 1x/10x/60x, pause, +5 min, back to real time) · 4 Scenarios (run all, table) · 5 Data check (official statuses, age, real/simulated) · 6 Change log · 7 Mesh · 8 Dispatch server URL · 9 Real Bluetooth (off).
+- Fixed: toggles were usable before their state loaded (a tap could flip the wrong way); quick "+5 min" taps raced and reset the night.
+- Browser run at 360 px (quality gates): 2:15 AM in daytime → fresh plan "On time"; Road closed → one plain banner; All live info off + 15 min → plan kept, pill "Offline: using saved info", "Traffic info is old." + Backup, no banned words; scenarios 8/8 in ~10 s; no console errors.
+
 ## Commands
 - Tests: `cd frontend && npm test` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 
@@ -37,4 +42,4 @@
 - `cd server && npm install && npm start`, then put the printed Wi-Fi address in Demo → 8. Dispatch server.
 
 ## Next
-- Phase 5: Demo drawer to spec (order, Set to 2:15 AM, speed), scenarios table, change log.
+- Phase 6: polish, 360px / large font / Hindi checks, accessibility labels, README, DEMO.md, final APK.

@@ -78,3 +78,7 @@ Decisions made without asking (per the working rules), with the reason for each.
 * **Text my contact** opens the SMS app with the message and an OpenStreetMap link filled in; the user picks the contact and taps send (no contact list access, nothing sent automatically). Location = the trip's current point, else the start point.
 * **Safety timer**: "Are you home?" at `max(Be there by, trip start) + 10 min` (app clock, converted to real time so a 10x/60x demo clock works). It is shown as a local notification and in the app. No answer within 5 min → a simulated alert to the server's **Contact** desk and the app offers the text. Switching on is remembered. End trip / I'm home cancels it.
 * **Plain http to the laptop**: the APK allows cleartext traffic (`usesCleartextTraffic`) because the demo server is on the local Wi-Fi without TLS. The dispatch URL can be baked in at build time (`VITE_DISPATCH_URL`) or set in the Demo drawer (saved on the phone).
+* **Demo clock jumps re-plan the trip**: "Set to 2:15 AM" (or any time / reset) plans the same request again for the new time and keeps the option the user had started. Moving forward ages every fact step by step; moving back more than a minute starts the night fresh (sources back on). "+5 min" is one atomic step in the engine, so quick taps add up.
+* **Scenarios run in their own worker** (about 10 s for eight), so the app keeps ticking while the Demo drawer waits.
+* **Real Bluetooth** is shown in the drawer as OFF with the reason (Phase 7, flag `MESH_REAL`).
+

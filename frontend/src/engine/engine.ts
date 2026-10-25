@@ -79,7 +79,8 @@ export class Engine {
       this.clock.set({ speed: o.speed, paused: o.paused });
     } else {
       this.clock.set(o);
-      if (o.time !== undefined) { this.reset(this.clock, true); }               // jump back: start the night fresh
+      // jump back (more than a minute): start the night fresh; a tiny step back is just a re-sync
+      if (o.time !== undefined && o.time < this.last - 60000) { this.reset(this.clock, true); }
     }
     this.last = this.clock.now();
   }

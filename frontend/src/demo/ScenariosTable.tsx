@@ -23,14 +23,15 @@ export function ScenariosTable() {
   }, []);
   const run = async () => {
     setBusy(true);
-    try { const r = await demo.runAll(); setRes(Object.fromEntries(r.results.map((x) => [x.id, x]))); } finally { setBusy(false); }
+    setRes({});
+    try { await demo.runAll((r) => setRes((m) => ({ ...m, [r.id]: r }))); } finally { setBusy(false); }
   };
   const done = Object.values(res);
   return (
     <div>
       <div className="mb-2 flex items-center gap-3">
         <button onClick={run} disabled={busy} className="min-h-11 rounded-xl bg-accent px-4 font-bold text-accent-ink disabled:opacity-50">
-          {busy ? "Running all (~20 s)…" : "Run all scenarios"}
+          {busy ? `Running… ${Object.keys(res).length}/${list.length}` : "Run all scenarios"}
         </button>
         {done.length > 0 && <span className="font-semibold">{done.filter((r) => r.passed).length}/{done.length} pass</span>}
       </div>

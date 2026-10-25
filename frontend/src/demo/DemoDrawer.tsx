@@ -7,8 +7,8 @@ import { fireTimerSoon } from "../sos/safetyTimer";
 import { MeshGraph } from "./MeshGraph";
 import { ScenariosTable } from "./ScenariosTable";
 
-/** Hidden Demo drawer (UI_SPEC §5). For judges: technical words are allowed here. The main
- *  screens react on their own (pill, banner, Backup) because they only read the plan stream. */
+/** Hidden Demo drawer (spec §11), for judges: technical words are allowed here. The normal screens
+ *  react on their own (pill, banner, Backup) because they only render what the engine pushes. */
 export default function DemoDrawer({ view, onClose }: { view: SimpleView | null; onClose: () => void }) {
   const [sim, setSim] = useState<SimState | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
@@ -37,7 +37,8 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
 
   const Toggle = ({ id, label }: { id: string; label: string }) => (
     <button onClick={() => act(() => demo.outage(id as Parameters<typeof demo.outage>[0], !on(id)), `${label} ${on(id) ? "OFF" : "ON"}`)}
-      className={`flex min-h-14 items-center justify-between gap-2 rounded-2xl border px-4 font-bold ${on(id) ? "border-good/60 bg-good/10" : "border-bad/60 bg-bad/10"}`}
+      disabled={!sim}   /* until the current state is known, a tap could flip the wrong way */
+      className={`flex min-h-14 items-center justify-between gap-2 rounded-2xl border px-4 font-bold disabled:opacity-40 ${on(id) ? "border-good/60 bg-good/10" : "border-bad/60 bg-bad/10"}`}
       aria-pressed={on(id)}>
       <span>{label}</span><span className={on(id) ? "text-good" : "text-bad"}>{on(id) ? "ON" : "OFF"}</span>
     </button>
@@ -88,12 +89,17 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
         </Section>
 
         <Section id="time" title="3. Time">
-          <p className="mb-2 font-mono text-[1.1rem]">{sim ? sim.now_text : "--:--"} {sim?.paused ? "(paused)" : `×${sim?.speed}`}</p>
+          <p className="mb-2 font-mono text-[1.1rem]">App clock {sim ? sim.now_text : "--:--"} {sim?.paused ? "(paused)" : `×${sim?.speed}`}</p>
+          <button onClick={() => act(() => demo.clock({ time: "02:15" }), "Clock set to 2:15 AM; the trip was planned again for that time")}
+            className="mb-2 min-h-14 w-full rounded-2xl bg-accent px-4 text-[1.1rem] font-bold text-accent-ink">Set to 2:15 AM</button>
           <div className="flex flex-wrap gap-2">
-            <Act label={sim?.paused ? "▶ Run" : "⏸ Pause"} onClick={() => act(() => demo.clock({ paused: !sim?.paused }), "Clock")} />
-            {[1, 10, 60].map((s) => <Act key={s} label={`${s}×`} onClick={() => act(() => demo.clock({ speed: s, paused: false }), `Speed ${s}×`)} />)}
-            <Act label="+5 min" onClick={() => act(() => demo.clock({ advance_s: 300 }), "+5 min")} />
-            <Act label="Reset" onClick={() => act(() => demo.reset(), "Simulation reset (real time)")} />
+            <Act label={sim?.paused ? "▶ Run" : "⏸ Pause"} onClick={() => act(() => demo.clock({ paused: !sim?.paused }), sim?.paused ? "Clock running" : "Clock paused")} />
+            {[1, 10, 60].map((s) => (
+              <button key={s} onClick={() => act(() => demo.clock({ speed: s, paused: false }), `Speed ${s}×`)} aria-pressed={sim?.speed === s && !sim?.paused}
+                className={`min-h-12 rounded-2xl border px-4 font-semibold ${sim?.speed === s && !sim?.paused ? "border-accent bg-accent/15" : "border-edge bg-raised"}`}>{s}×</button>
+            ))}
+            <Act label="+5 min" onClick={() => act(() => demo.clock({ advance_s: 300 }), "+5 min (facts age)")} />
+            <Act label="Back to real time" onClick={() => act(() => demo.reset(), "Night reset to the phone's real time; sources back on")} />
           </div>
           <div className="mt-2 flex gap-2">
             <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="Set sim time"
@@ -177,6 +183,14 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
               if (!(await fireTimerSoon())) throw new Error("no timer: switch on “Tell my contact if I’m late”, then Start");
             }, "Asking “Are you home?” now; alert in 20 s if no answer")} />
           </div>
+        </Section>
+
+        <Section id="ble" title="9. Real Bluetooth">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-edge bg-raised px-4 py-3">
+            <span className="font-semibold">Real Bluetooth relay</span>
+            <span className="rounded-full border border-edge px-3 py-1 text-soft">OFF</span>
+          </div>
+          <p className="mt-2 text-[0.9rem] text-soft">Not in this build: the BLE relay is Phase 7, behind the flag MESH_REAL (off until two real phones exchange a packet). Help uses the simulated mesh above.</p>
         </Section>
       </div>
     </div>

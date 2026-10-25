@@ -15,6 +15,9 @@ export interface SimState { now_text: string; speed: number; paused: boolean; so
 export type ScenarioResult = EngineResult;
 export interface LogLine { hhmm: string; severity: string; message: string; code?: string }
 
+const results = new Map<string, ScenarioResult>();
+let runner: Worker | null = null;
+
 export const demo = {
   trust: async () => {
     const t = await call("trust");
@@ -28,13 +31,21 @@ export const demo = {
   outage: (source: SourceArg, enabled: boolean) => call("outage", source, enabled),
   inject: (type: string, params: Record<string, unknown>) => call("inject", { type, params } as SimEvent),
   clock: async (o: { speed?: number; paused?: boolean; time?: string; advance_s?: number }) => {
-    if (o.advance_s) { const c = await call("clock"); return call("setClock", { time: c.now + o.advance_s * 1000 }); }
+    if (o.advance_s) return call("advance", o.advance_s);           // one step in the worker: quick taps add up
     return call("setClock", { hhmm: o.time, speed: o.speed, paused: o.paused });
   },
   reset: () => call("reset"),
   scenarios: () => call("scenarios"),
-  results: async () => ({ results: await call("results") }),
-  runAll: async () => ({ results: await call("runScenarios") }),
+  results: async () => ({ results: [...results.values()] }),
+  /** All eight scenarios in their own worker; `onResult` fires as each one finishes. */
+  runAll: (onResult?: (r: ScenarioResult) => void) => new Promise<{ results: ScenarioResult[] }>((ok) => {
+    runner ??= new Worker(new URL("../engine/scenarioWorker.ts", import.meta.url), { type: "module" });
+    runner.onmessage = (ev: MessageEvent<{ result?: ScenarioResult; done?: boolean }>) => {
+      if (ev.data.result) { results.set(ev.data.result.id, ev.data.result); onResult?.(ev.data.result); }
+      if (ev.data.done) ok({ results: [...results.values()] });
+    };
+    runner.postMessage("run");
+  }),
 };
 
 /** "All live info" reads ON while any live source still runs, so one tap always means "switch them all off". */
