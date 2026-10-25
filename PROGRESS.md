@@ -44,6 +44,10 @@
 - **Unverified on the phone**: notification prompt, SMS/tel intents, phone → laptop over Wi-Fi.
 - Known gaps: the result screen shows about 35 words with the late-alert switch on (spec: about 25); scenario results show "age 0 s" for data newer than a clock set back in the Demo drawer.
 
+## Phase 7: real Bluetooth relay (built, two-phone test pending)
+- Native Capacitor plugin in Kotlin (`frontend/android/app/src/main/java/org/cascade/nightway/mesh/`), `BleMeshTransport` in `src/sos/ble.ts`, Demo drawer 9. Flag `MESH_REAL` off by default; any failure falls back to the simulated mesh.
+- Builds and all 56 tests pass. **Not yet verified between two phones**: steps in docs/BLE_STATUS.md; results to be recorded there.
+
 ## Commands
 - Tests: `cd frontend && npm test` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 
@@ -51,4 +55,4 @@
 - `cd server && npm install && npm start`, then put the printed Wi-Fi address in Demo → 8. Dispatch server.
 
 ## Next
-- Phase 7 (optional, time-boxed 2 h): real Bluetooth relay behind `MESH_REAL` (off). Needs two Android phones to verify.
+- Two-phone Bluetooth test (user), then record results in docs/BLE_STATUS.md.

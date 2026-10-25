@@ -10,7 +10,9 @@ $shell = New-Object -ComObject Shell.Application
 $phone = $shell.Namespace(17).Items() | Where-Object { $_.Type -match "phone|Mobile|Portable" -or $_.Name -match "POCO|Xiaomi|Redmi|Android|Galaxy|Pixel" } | Select-Object -First 1
 if (-not $phone) { Write-Error "No phone in This PC. Connect it and choose 'File transfer' on the phone."; exit 1 }
 $storage = $phone.GetFolder.Items() | Select-Object -First 1
+if (-not $storage) { Write-Error ("'" + $phone.Name + "' shows no storage. Unlock the phone and choose 'File transfer' in the USB notification, then run this again."); exit 1 }
 $dl = $storage.GetFolder.Items() | Where-Object { $_.Name -eq "Download" } | Select-Object -First 1
+if (-not $dl) { Write-Error "No Download folder on the phone's storage."; exit 1 }
 $old = $dl.GetFolder.Items() | Where-Object { $_.Name -eq "NightWay.apk" }
 if ($old) { $old.InvokeVerb("delete") ; Start-Sleep -Seconds 2 }
 $dl.GetFolder.CopyHere($tmp, 16)

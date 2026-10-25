@@ -87,6 +87,7 @@ export const CONFIG = {
     tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     maxZoom: 19,
     tileErrorsBeforeRoads: 3,
+    boundsFactor: 2.5,        // the map can be panned this many area-radii from the centre (data stops at 1)
   },
   dispatch: {
     // the phone reaches the laptop over Wi-Fi: set VITE_DISPATCH_URL at build time or in the Demo drawer
