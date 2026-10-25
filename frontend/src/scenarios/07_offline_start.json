@@ -1,0 +1,5 @@
+{ "id": "offline_start", "name": "7. Offline start", "seed": 42,
+  "description": "The phone starts with no network and no live info ever, and the saved forecast is missing. Weather and road closures are UNKNOWN, never assumed.",
+  "request": { "from": "work", "to": "home", "finish": "02:15", "by": "03:00" },
+  "offline_start": true, "unavailable": ["weather_forecast"], "events": [],
+  "expect": { "never_unknown_as_value": true, "always_has_plan": true, "min_status": "UNKNOWN", "status_reaches": { "weather": "UNKNOWN" } } }

@@ -1,0 +1,5 @@
+{ "id": "rain_mid_trip", "name": "4. Heavy rain mid-trip", "seed": 42,
+  "description": "Heavy rain at 02:18 (forecast said dry). Weather info picks it up, walking slows, safety drops, low spots flood later.",
+  "request": { "from": "work", "to": "home", "finish": "02:15", "by": "03:00", "modes": ["walk", "bus"], "maxWalkM": 4000 },
+  "events": [{ "t": "02:18", "type": "rain_start", "params": { "intensity": "heavy" } }],
+  "expect": { "never_unknown_as_value": true, "always_has_plan": true, "safety_drops": true } }

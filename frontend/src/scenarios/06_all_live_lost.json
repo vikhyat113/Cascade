@@ -1,0 +1,5 @@
+{ "id": "all_live_lost", "name": "6. All live info lost", "seed": 42,
+  "description": "Every live source dies at 02:18. A plan must still appear from saved data, timetable and models; confidence drops; nothing is invented.",
+  "request": { "from": "work", "to": "home", "finish": "02:15", "by": "03:00" },
+  "events": [{ "t": "02:18", "type": "source_outage", "params": { "source": "all_live" } }], "end": "03:10",
+  "expect": { "never_unknown_as_value": true, "always_has_plan": true, "confidence_drops": true, "min_status": "OUTDATED" } }

@@ -1,0 +1,4 @@
+{ "id": "baseline_calm", "name": "1. Calm night", "seed": 42,
+  "description": "Finish at 02:15, home by 03:00. Everything healthy, nothing happens: the plan stays stable and valid.",
+  "request": { "from": "work", "to": "home", "finish": "02:15", "by": "03:00" }, "events": [],
+  "expect": { "never_unknown_as_value": true, "always_has_plan": true, "still_on_time": "yes", "plan_changed": false } }

@@ -1,0 +1,5 @@
+{ "id": "hours_unknown", "name": "8. Place with unknown hours", "seed": 42,
+  "description": "Pharmacies are on the map but none lists opening hours. Open-now must call them Not sure (never Open) and rank sure places first.",
+  "request": { "from": "work", "to": "home", "finish": "02:15", "by": "03:00" }, "events": [], "end": "02:12",
+  "checks": [{ "type": "need_now", "kind": "pharmacy" }, { "type": "need_now", "kind": "atm" }, { "type": "need_now", "kind": "atm", "disable": "osm_hours" }],
+  "expect": { "never_unknown_as_value": true, "always_has_plan": true } }

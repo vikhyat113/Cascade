@@ -52,3 +52,13 @@ Decisions made without asking (per the working rules), with the reason for each.
 * **No authentication**, and CORS is open: this is a local demo.
 * Built and tested on **Python 3.14** (spec: 3.11+) and Node 25.
 * **Demo video**: `scripts/record_demo.py` records an automated walkthrough with Playwright (a backup, not a narrated video).
+
+## Android build (SPEC v3): engine on the phone
+
+* **The engine is a TypeScript port** of `backend/app/core` + `presentation/simple_view.py` in `frontend/src/engine/`. The Python backend stays as the reference implementation and is not shipped. The same 8 scenarios run against both (`backend` pytest, `frontend` Vitest). Thresholds live in `frontend/src/config.ts`.
+* **Area radius 4 km** (SPEC suggests ~2.5 km): 2.5 km around Sector 18 cuts off the Home end in Sector 12. Bundle: `graph.json` ≈ 0.9 MB after 2 m Douglas–Peucker simplification.
+* **One walking graph is used for cars too** (edges flagged `carOk` by highway class). One-way streets are ignored for cabs: a small ETA error on a 4 km area, and it halves the bundle. Documented, not hidden: the cab ETA band is already wide.
+* **Simple-view safety thresholds are 66 / 55** on the worst-case score, not 75 / 50. With 97 % of lighting UNKNOWN, worst-case scores sit lower than the spec's examples assumed; 75 made every night walk "careful". The tests pin the boundary values.
+* **Cab wait is a prior model only** (`cab.baseWaitMin` by hour). The simulator's cab-shortage truth is never read by the planner; it would only reach it through a feed, and no cab feed exists.
+* **Local time** uses a fixed offset (`tz_offset_min` 330, IST has no DST), so the app gives the same answers whatever the phone's timezone.
+* **`npm run data`** runs `tools/build_data.py` with `backend/.venv` Python when present (`scripts/py.mjs`). Laptop-only; the APK only ships its output.
