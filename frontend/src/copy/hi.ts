@@ -156,6 +156,16 @@ export const hi: Record<CopyKey, string> = {
   "label.safePlaces": "सुरक्षित जगहें",
   "line.waitSafe": "या किसी सुरक्षित जगह रुकें।",
 
+  "line.offWay": "आप रास्ते से हट गए हैं।",
+  "line.farWay": "आप रास्ते से बहुत दूर हैं।",
+  "label.newWay": "नया रास्ता",
+  "label.imFine": "मैं ठीक हूँ",
+  "label.callSomeone": "किसी को बुलाएँ",
+  "line.areYouOk": "क्या आप ठीक हैं?",
+  "line.newWayFromHere": "यहाँ से नया रास्ता।",
+  "label.demoTime": "डेमो समय",
+  "fmt.smsOffWay": "रास्ते से हटा हूँ। मैं यहाँ हूँ: {link}",
+
   "reason.lit": "रोशनी वाली सड़कें",
   "reason.mainRoads": "मुख्य सड़कें",
   "reason.shopsOpen": "रास्ते में दुकानें खुली",

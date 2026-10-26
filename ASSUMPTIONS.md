@@ -92,3 +92,11 @@ Decisions made without asking (per the working rules), with the reason for each.
 * **Road closed** (police barricade) now blocks walkers too (no own vehicle any more); accidents only add risk. Bus rides do not use street edges, so a closure does not stop a bus.
 * **Speed**: "nearest open place" per street segment was brute force (689 ms per 15-min slice on this graph); it is now a grid search capped at 3.5 km (84 ms), identical to brute force within the cap (unit test). Planning IIIT Nagpur → Dharampeth: ~0.4 s in the browser.
 
+## UPGRADE U6: deviation warning
+
+* **Which GPS**: real GPS (Capacitor Geolocation watch, high accuracy) only on a trip that started from a real fix inside the area. A trip started from the demo point uses the Demo drawer's fake GPS; otherwise the dot follows the plan's progress. All on-device; works offline.
+* **Thresholds** (config `deviation`): fixes worse than ±50 m are ignored; "off the way" = 3 fixes in a row beyond 60 m **and** 20 s since the first of them; "far" = beyond 250 m (3 fixes) or off for over 3 min; on a bus / metro step 150 m / 500 m; back on the way after 2 good fixes. "I'm fine" quiets **"off"** for 3 min; **"far" is always shown** (a different situation; safety first).
+* **"New way"** re-plans from the current fix with the same destination and "Be there by", picks the same tab, starts it, and shows one banner "New way from here."
+* **"Are you OK?"** after 5 min without moving 25 m, at night, not on a ride (reuses the safety-timer sheet: I'm fine / I need help).
+* **Demo**: "Walk the way" 1× / 10× moves a fake GPS along the way (1.3 m/s × speed); "Wander off" 80 / 300 m **jumps** to a spot that far off (the side farther from the whole way) and stays there. A "Demo time" chip shows in the sheet footer while time or location is simulated.
+

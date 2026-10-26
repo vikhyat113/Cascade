@@ -104,14 +104,15 @@ export function HelpSheet({ at, fresh, onClose, onGo }: { at: Place | null; fres
 }
 
 /** Safety timer question: "Are you home?", and after no answer, the text to the contact. */
-export function SafetySheet({ at, late, onHome, onHelp }: { at: Place; late: boolean; onHome: () => void; onHelp: () => void }) {
+export function SafetySheet({ at, late, onHome, onHelp, ok = false }: { at: Place; late: boolean; onHome: () => void; onHelp: () => void; ok?: boolean }) {
   const { t } = useT();
+  const title = t(ok ? "line.areYouOk" : "line.areYouHome");
   return (
-    <Overlay onClose={() => {}} label={t("line.areYouHome")}>
-      <h2 className="text-[1.6rem] font-bold">🏠 {t("line.areYouHome")}</h2>
+    <Overlay onClose={() => {}} label={title}>
+      <h2 className="text-[1.6rem] font-bold">{ok ? "🙋" : "🏠"} {title}</h2>
       {late && <p className="text-[1.1rem] font-semibold text-warn">{t("line.lateText")}</p>}
       {late && <TextContact at={at} late />}
-      <BigButton onClick={onHome}>{t("label.imHome")}</BigButton>
+      <BigButton onClick={onHome}>{t(ok ? "label.imFine" : "label.imHome")}</BigButton>
       <BigButton tone="help" onClick={onHelp}>🆘 {t("label.needHelp")}</BigButton>
     </Overlay>
   );

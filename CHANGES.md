@@ -28,3 +28,6 @@ Each request: what it was, which layer it touched, what was done.
 ## 6. UPGRADE U4: cab removed, Metro + estimated buses, transfers (tag up-4)
 - **Layer**: data (`scripts/build_transit.py`, docs/TRANSIT_DATA.md), engine (`transit.ts` itinerary search, `planner.ts`, `simpleView.ts`, `services.ts` speed-up, `risk.ts` closures), copy (EN + HI), Result steps, map change markers, Demo switch.
 
+## 7. UPGRADE U6: deviation warning (tag up-6)
+- **Layer**: engine (`deviation.ts`), position source (`lib/position.ts`, real or Demo fake GPS), App banners and re-plan, copy (EN + HI), config `deviation`, Demo drawer 10.
+

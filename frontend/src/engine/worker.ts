@@ -83,7 +83,7 @@ const handlers = {
     await ready;
     const m = engine.world.meta;
     return { city_name: m.city_name, center: m.center, radius_m: m.radius_m, zones: (m.zones ?? []).map((z) => ({ id: z.id, name: z.name, ring: z.ring })),
-      bbox: engine.world.bbox(), ui_defaults: m.ui_defaults, real: m.real, synthetic: m.synthetic, sample: m.sample };
+      bbox: engine.world.bbox(), tz_offset_min: m.tz_offset_min, night_hours: CONFIG.risk.nightHours, ui_defaults: m.ui_defaults, real: m.real, synthetic: m.synthetic, sample: m.sample };
   },
   setLang(l: Lang) { lang = l; push(true); },
   plan(a: TripAsk) { lastAsk = a; chosenTab = null; engine.plan(request(a)); const v = plainView(); lastView = JSON.stringify(v); return v; },

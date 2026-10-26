@@ -74,6 +74,13 @@
 - Checks: 64 app tests (new: no invented night service, transfers IIIT → Dharampeth < 1.5 s, change wording, unknown-hours warning, grid search = brute force) + 53 backend tests; browser run of IIIT → Home at 2:15 AM with and without pretending.
 - Unverified on the phone: planning time for the long trip.
 
+### U6: deviation warning (done, tag up-6)
+- `engine/deviation.ts`: distance + progress to the planned way, accuracy filter, hysteresis, off / far levels, snooze, "Are you OK?" when still at night. Banners: "You are off the way." (New way / I'm fine), "You are far from the way." (New way / Call someone / SOS). "New way" re-plans from the current fix.
+- Demo drawer 10: fake GPS "Walk the way" 1× / 10×, "Wander off" 80 / 300 m, "Demo time" chip.
+- Fixed while testing: Wander off kept walking alongside a winding way and kept coming back within 60 m (now a jump to a fixed spot); "far" was hidden by the 3-min snooze (now always shown).
+- Checks: 9 deviation tests (maths, jitter quiet, hysteresis, accuracy, far by distance / time, vehicle line, snooze, far during snooze, still) + re-plan from an off point; browser run: off after 24 s, I'm fine, far, New way; SOS e2e still passes.
+- Unverified on the phone: real GPS watch accuracy and battery during a trip.
+
 ## Commands
 - Tests: `cd frontend && npm test` · SOS on every screen: `npm run build && npm run e2e` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 

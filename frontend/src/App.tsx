@@ -4,11 +4,14 @@ import { useT, type CopyKey } from "./copy";
 import type { TripAsk } from "./engine/worker";
 import { MapCanvas } from "./components/MapCanvas";
 import { SosButton } from "./components/SosButton";
-import { BackButton, Banner, Pill } from "./components/ui";
+import { BackButton, Banner, DeviationBanner, Pill } from "./components/ui";
+import { setDemoActive } from "./lib/demoFlag";
+import { DeviationMonitor } from "./engine/deviation";
+import { fakeGps, useFakeGps, usePosition } from "./lib/position";
 import { call, listen } from "./lib/engine";
 import { useLive } from "./lib/live";
 import { freshFix, lastTrip, loadFlag, loadLastFix, loadPlace, myLocation, rememberTrip, saveFlag, saveLastFix, savePlace } from "./lib/saved";
-import { alertContact, restoreRealBluetooth } from "./sos";
+import { alertContact, mapLink, restoreRealBluetooth, smsHref } from "./sos";
 import { armTimer, disarmTimer, loadTimer, onTimerTapped, saveTimer, timerTimes } from "./sos/safetyTimer";
 import { Home, NEEDS } from "./screens/Home";
 import { OpenNow } from "./screens/OpenNow";
@@ -60,6 +63,14 @@ function Main() {
   const [demoOpen, setDemoOpen] = useState(false);
   const [lateAlert, setLateAlertState] = useState(false);
   const [safety, setSafety] = useState<"ask" | "late" | null>(null);
+  const [dev, setDev] = useState<"ok" | "off" | "far">("ok");
+  const [askOk, setAskOk] = useState(false);
+  const [note, setNote] = useState<{ id: string; text: string } | null>(null);   // the app's own one-line banner
+  const [appNow, setAppNow] = useState(Date.now());
+  const devMon = useRef(new DeviationMonitor());
+  const fixRef = useRef<{ lat: number; lon: number } | null>(null);
+  const fakeOn = useFakeGps();
+  useEffect(() => { setDemoActive(fakeOn || Math.abs(appNow - Date.now()) > 120000); }, [fakeOn, appNow]);
   const seen = useRef(new Set<string>());
   const ask = useRef<TripAsk | null>(null);
   const conn = useLive(cfg?.center ?? null);
@@ -101,11 +112,12 @@ function Main() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- live updates: the engine pushes a fresh view on every tick; words follow the language ----------
-  useEffect(() => listen((m) => { if (m.type === "view") setView(m.view); }), []);
+  useEffect(() => listen((m) => { if (m.type === "view") setView(m.view); else setAppNow(m.now); }), []);
   useEffect(() => { call("setLang", lang).catch(() => {}); }, [lang]);
 
   // ---- safety timer: ask "Are you home?", then alert the contact if there is no answer ----------------
-  const here = (): Place | null => (view?.trip?.position ? { lat: view.trip.position[0], lon: view.trip.position[1], name: "" } : from);
+  const here = (): Place | null => (fixRef.current ? { lat: fixRef.current.lat, lon: fixRef.current.lon, name: "" }
+    : view?.trip?.position ? { lat: view.trip.position[0], lon: view.trip.position[1], name: "" } : from);
   const hereRef = useRef(here);
   hereRef.current = here;
   useEffect(() => {
@@ -163,6 +175,43 @@ function Main() {
   const options = view?.options ?? [];
   const shown = options.find((o) => o.id === shownId) ?? options.find((o) => o.tab) ?? null;
   const current = options.find((o) => o.id === view?.current_option_id) ?? shown;
+
+  // ---- deviation warning (UPGRADE §7): real GPS when the trip started from a real fix, else the Demo's fake GPS ----
+  const onTrip = screen === "trip" && !!current && !view?.trip?.arrived;
+  const realStart = !!from && from.kind === "here" && !from.demo;
+  const fix = usePosition(onTrip, realStart);
+  fixRef.current = fix;
+  useEffect(() => {
+    if (!fix || !onTrip || !current || !cfg) return;
+    const vehicle = view?.trip?.next_icon === "bus" || view?.trip?.next_icon === "metro";
+    const hour = new Date(appNow + (cfg.tz_offset_min ?? 330) * 60000).getUTCHours();
+    const [a, b] = cfg.night_hours ?? [19, 6];
+    const st = devMon.current.update(fix, current.path, vehicle, hour >= a || hour < b);
+    setDev(devMon.current.shown(Date.now()));
+    if (st.still) setAskOk(true);
+  }, [fix]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!onTrip) { devMon.current.reset(); setDev("ok"); } }, [onTrip]);
+
+  /** "New way": plan again from where the phone is now, same destination and "Be there by". */
+  const newWayFromHere = async () => {
+    const at = fix ?? (view?.trip?.position ? { lat: view.trip.position[0], lon: view.trip.position[1] } : null);
+    if (!at || !ask.current) return;
+    const a: TripAsk = { ...ask.current, from: { lat: at.lat, lon: at.lon, name: "", kind: null }, when: null };
+    const v = await call("plan", a).catch(() => null);
+    if (!v?.options.length) return;
+    const opt = v.options.find((o) => o.id === shownId) ?? v.options.find((o) => o.tab) ?? v.options[0];
+    const v2 = (await call("choose", opt.plan_id).catch(() => null)) ?? v;
+    ask.current = a;
+    rememberTrip({ ask: a, option: opt.id, started: true });
+    setView(v2);
+    setShownId(v2.current_option_id || opt.id);
+    devMon.current.reset();
+    setDev("ok");
+    const now = v2.options.find((o) => o.id === (v2.current_option_id || opt.id));
+    if (now && fakeGps.running()) fakeGps.follow(now.path);
+    setNote({ id: `nw-${Date.now()}`, text: t("line.newWayFromHere") });
+  };
+
 
   // ---- actions ----------------------------------------------------------------------------------
   const find = useCallback(async (dest: Place | null = to) => {
@@ -265,7 +314,7 @@ function Main() {
                fitKey: `r-${view?.id}-${shown.id}-${showPlaces}` };
     }
     if (screen === "trip" && current) {
-      return { path: current.path, start: current.start, end: current.end, changes: current.changes, me: view?.trip?.position ?? null,
+      return { path: current.path, start: current.start, end: current.end, changes: current.changes, me: fix ? [fix.lat, fix.lon] as LatLon : view?.trip?.position ?? null,
                fitKey: `t-${view?.id}-${current.plan_id}` };
     }
     if (screen === "opennow") {
@@ -294,7 +343,13 @@ function Main() {
           choosePlace({ lat, lon, name }, field === "to" ? pickSave : null);
         } : null} />
       <Pill connection={conn} long={screen === "trip"} />
-      {banner && <Banner id={banner.id} text={banner.text} onDone={() => setBannerId(null)}
+      {onTrip && dev !== "ok" && !help && (
+        <DeviationBanner level={dev} onNewWay={newWayFromHere} onSos={openHelp}
+          onFine={() => { devMon.current.snooze(Date.now()); setDev("ok"); }}
+          sms={smsHref(t("fmt.smsOffWay", { link: fix ? mapLink(fix.lat, fix.lon) : "" }))} />
+      )}
+      {note && dev === "ok" && <Banner id={note.id} text={note.text} onDone={() => setNote(null)} />}
+      {banner && !note && dev === "ok" && <Banner id={banner.id} text={banner.text} onDone={() => setBannerId(null)}
         onSee={() => { if (banner.see_option_id) setShownId(banner.see_option_id); }} />}
 
       {screen === "home" && (
@@ -328,6 +383,8 @@ function Main() {
       )}
       {help && <HelpSheet at={help.at} fresh={help.fresh} onClose={() => setHelp(null)} onGo={goTo} />}
       {safety && !help && from && <SafetySheet at={here() ?? from} late={safety === "late"} onHome={imHome} onHelp={safetyHelp} />}
+      {askOk && !safety && !help && from && <SafetySheet ok at={here() ?? from} late={false}
+        onHome={() => { devMon.current.okStill(Date.now()); setAskOk(false); }} onHelp={() => { setAskOk(false); openHelp(); }} />}
       <SosButton onPress={openHelp} />
 
       <Suspense fallback={null}>

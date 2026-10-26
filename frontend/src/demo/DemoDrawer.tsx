@@ -4,6 +4,7 @@ import type { SimpleView } from "../types";
 import { ago, anyLive, demo, OFFICIAL, type LogLine, type SimState, type Source, type Status } from "./demoApi";
 import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl } from "../sos";
 import { BleSection } from "./BleSection";
+import { FakeGpsSection } from "./FakeGpsSection";
 import { LocationCheck } from "./LocationCheck";
 import { fireTimerSoon } from "../sos/safetyTimer";
 import { MeshGraph } from "./MeshGraph";
@@ -196,6 +197,10 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
 
         <Section id="ble" title="9. Real Bluetooth (MESH_REAL)">
           <BleSection />
+        </Section>
+
+        <Section id="gps" title="10. Location (simulated)">
+          <FakeGpsSection view={view} />
         </Section>
       </div>
     </div>

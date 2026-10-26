@@ -117,6 +117,21 @@ export const CONFIG = {
     // on the phone); falls back to the simulated mesh whenever Bluetooth or the plugin is unavailable.
     realDefault: false,
   },
+  deviation: {                 // UPGRADE §7, tuned for walking
+    maxAccuracyM: 50,           // ignore fixes worse than this
+    consecutive: 3,             // fixes in a row beyond the line before anything is said
+    backAfter: 2,               // fixes back on the way to clear a warning
+    offM: 60,                   // "You are off the way." beyond this ...
+    offAfterS: 20,              // ... for this long
+    farM: 250,                  // "You are far from the way." beyond this ...
+    farAfterS: 180,             // ... or off the way for this long
+    offVehicleM: 150,           // on a bus / metro ride the line is wider
+    farVehicleM: 500,
+    snoozeS: 180,               // "I'm fine"
+    stillAfterS: 300,           // "Are you OK?" after this long without moving, at night
+    stillMoveM: 25,
+    fakeStepMs: 1000,           // Demo "Walk the way": one fake fix per second
+  },
   safetyTimer: {
     afterDeadlineMin: 10,     // "Are you home?" this long after "Be there by"
     answerWithinMin: 5,       // no answer by then: alert the contact (simulated) and offer the text

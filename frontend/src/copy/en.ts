@@ -156,6 +156,16 @@ export const en = {
   "label.safePlaces": "Safe places",
   "line.waitSafe": "Or wait somewhere safe.",
 
+  "line.offWay": "You are off the way.",
+  "line.farWay": "You are far from the way.",
+  "label.newWay": "New way",
+  "label.imFine": "I'm fine",
+  "label.callSomeone": "Call someone",
+  "line.areYouOk": "Are you OK?",
+  "line.newWayFromHere": "New way from here.",
+  "label.demoTime": "Demo time",
+  "fmt.smsOffWay": "Off my way. I am here: {link}",
+
   "reason.lit": "lit roads",
   "reason.mainRoads": "main roads",
   "reason.shopsOpen": "shops open on the way",

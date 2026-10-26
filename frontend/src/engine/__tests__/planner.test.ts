@@ -68,6 +68,17 @@ describe("planner on the bundled city", () => {
     expect(steps.slice(1).every((s) => s.change)).toBe(true);
   });
 
+  it("re-plans from a point off the way (deviation 'New way')", () => {
+    const e = testEngine();
+    const req = workHome(e, { modes: ["walk"] });
+    const off = { lat: req.origin.lat + 300 / 110540, lon: req.origin.lon, name: "", kind: null };   // 300 m north
+    const { ps } = planFull(e.state, { ...req, origin: off }, e.cache);
+    const rec = ps.plans.find((p) => p.id === ps.recommendedId)!;
+    expect(rec).toBeTruthy();
+    const [la, lo] = rec.segments[0].coords[0];
+    expect(Math.hypot((la - off.lat) * 110540, (lo - off.lon) * 103900)).toBeLessThan(5);
+  });
+
   it("still plans with all live info lost, with lower confidence and nothing invented", () => {
     const e = testEngine();
     const req = workHome(e, { finish: "02:10", by: "04:00" });
