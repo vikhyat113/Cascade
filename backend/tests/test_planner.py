@@ -111,7 +111,7 @@ def test_unknown_hours_pharmacy_is_never_called_open(engine, corners):
 
 
 def test_nl_rules_parse_spec_example():
-    r = parse_rules("I finish at 2:15 and need to reach Sector 12 by 3")
-    assert (r.finish_time, r.deadline, r.destination_text) == ("02:15", "03:00", "Sector 12")
+    r = parse_rules("I finish at 2:15 and need to reach Dharampeth by 3")
+    assert (r.finish_time, r.deadline, r.destination_text) == ("02:15", "03:00", "Dharampeth")
     h = parse_rules("I finish work at 2:15 AM, need home by 3:00 AM, no cab")
     assert (h.finish_time, h.deadline, h.destination_text, h.modes) == ("02:15", "03:00", "home", ["walk", "bus"])

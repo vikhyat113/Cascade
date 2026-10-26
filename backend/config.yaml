@@ -1,7 +1,20 @@
-# ---- Demo area (change these three lines + re-run scripts/fetch_all.py to switch city) ----
-city_name: "Noida (Sector 18 area)"
-center: {lat: 28.5705, lon: 77.3229}
-radius_m: 4000
+# ---- Demo area: Nagpur and Butibori (UPGRADE §2) ----
+# Named zones instead of one radius: two full-detail circles joined by a thin corridor along the real
+# main road (built by scripts/area.py into data/area.geojson). center/radius_m only enclose the zones
+# (projection origin + grid extent); "in the area" means inside a zone.
+city_name: "Nagpur and Butibori"
+center: {lat: 21.041, lon: 79.0515}
+radius_m: 16500
+area:
+  zones:
+    - {id: nagpur, name: "Nagpur core", lat: 21.145, lon: 79.078, radius_m: 4000}          # Sitabuldi, Dharampeth, Sadar, railway station
+    - {id: butibori, name: "Butibori and IIIT Nagpur", lat: 20.937, lon: 79.025, radius_m: 3200}   # Butibori town + Waranga (IIIT campus)
+  corridor:
+    id: corridor
+    name: "Wardha Road corridor"
+    buffer_m: 500
+    highways: "motorway|trunk|primary"                                                  # roads the corridor follows
+    major_highways: "motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link"
 timezone: "Asia/Kolkata"
 
 seed: 42
@@ -80,7 +93,8 @@ presentation:
   ok_min: 55
   banner_max_age_s: 600       # a plan change older than this is not shown as a banner
   ui_defaults:                # demo convenience: what Home / Work / start / "Be there by" are pre-filled with
-    persona: call_centre
+    persona: late_shift
+    start_at: {lat: 20.94605, lon: 79.04305, name: "IIIT Nagpur (Waranga)"}   # "My location (demo)" when GPS is outside the zones
     deadline: "03:00"
 
 # ---- Night-time behaviour of cabs (prior model, minutes) ----
@@ -88,55 +102,39 @@ cab:
   base_wait_min: {"22": 5, "23": 6, "0": 7, "1": 9, "2": 11, "3": 12, "4": 10, "5": 7}
   pickup_walk_m: 60
 
-# ---- Persona presets: origin/home are place-name queries resolved against OSM at startup ----
+# ---- Persona presets (Nagpur and Butibori). Points come from scripts/geocode_places.py (Nominatim) ----
+# The IIIT Nagpur permanent campus is not named in OpenStreetMap; Waranga village next to it stands in.
 personas:
-  - id: call_centre
-    label: "Call-centre agent"
-    origin: "Noida Sector 18"
-    home: "Police Station Sector-12"
-    home_label: "Home (Sector 12)"
+  - id: late_shift
+    label: "Late shift in the city"
+    origin: "Sitabuldi"
+    origin_at: {lat: 21.14254, lon: 79.07961, name: "Sitabuldi"}
+    home: "Dharampeth"
+    home_at: {lat: 21.14097, lon: 79.06243, name: "Home (Dharampeth)"}
     finish_time: "02:15"
     deadline: "03:00"
     modes: [walk, bus, cab]
     risk_weight: 0.75
     max_walk_m: 1500
-  - id: nurse
-    label: "Nurse (night shift)"
-    origin: "Kailash Hospital & Heart Institute"
-    home: "New Ashok Nagar"
-    home_label: "Home (New Ashok Nagar)"
-    finish_time: "02:00"
-    deadline: "02:50"
+  - id: iiit_student
+    label: "IIIT Nagpur student"
+    origin: "IIIT Nagpur"
+    origin_at: {lat: 20.94605, lon: 79.04305, name: "IIIT Nagpur (Waranga)"}
+    home: "Sadar"
+    home_at: {lat: 21.1592, lon: 79.07961, name: "Home (Sadar)"}
+    finish_time: "23:30"
+    deadline: "01:00"
     modes: [walk, bus, cab]
     risk_weight: 0.8
-    max_walk_m: 1200
-  - id: security_guard
-    label: "Security guard"
-    origin: "Noida City Centre"
-    home: "Chhalera"
-    home_label: "Home (Chhalera)"
-    finish_time: "03:00"
-    deadline: "03:50"
-    modes: [walk, bus, cab]
-    risk_weight: 0.6
-    max_walk_m: 3000
-  - id: delivery_worker
-    label: "Delivery worker"
-    origin: "Noida Sector 16"
-    home: "Nithari"
-    home_label: "Home (Nithari)"
+    max_walk_m: 1500
+  - id: railway_porter
+    label: "Railway station porter"
+    origin: "Nagpur Railway Station"
+    origin_at: {lat: 21.15138, lon: 79.09044, name: "Nagpur Railway Station"}
+    home: "Dharampeth"
+    home_at: {lat: 21.14097, lon: 79.06243, name: "Home (Dharampeth)"}
     finish_time: "02:30"
     deadline: "03:15"
     modes: [walk, bus]
-    risk_weight: 0.5
-    max_walk_m: 3500
-  - id: factory_worker
-    label: "Factory worker"
-    origin: "Okhla Vihar"
-    home: "Sadarpur"
-    home_label: "Home (Sadarpur)"
-    finish_time: "02:00"
-    deadline: "03:00"
-    modes: [walk, bus, cab]
-    risk_weight: 0.7
-    max_walk_m: 2000
+    risk_weight: 0.6
+    max_walk_m: 3000

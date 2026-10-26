@@ -7,7 +7,7 @@ export function Sheet({ children, onHeight }: { children: ReactNode; onHeight?: 
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current || !onHeight) return;
-    const ro = new ResizeObserver(() => onHeight(ref.current!.offsetHeight));
+    const ro = new ResizeObserver(() => { if (ref.current) onHeight(ref.current.offsetHeight); });   // the sheet may be gone already
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, [onHeight]);
@@ -57,7 +57,7 @@ export function Pill({ connection, long = false }: { connection: "live" | "offli
   const { t } = useT();
   const live = connection === "live";
   return (
-    <div className="pointer-events-none fixed left-0 right-0 top-3 z-30 flex justify-center">
+    <div className="pointer-events-none fixed left-3 top-3 z-30 flex max-w-[calc(100%-6rem)]">
       <div role="status" aria-live="polite"
         className="flex min-h-9 items-center gap-2 rounded-full border border-edge bg-surface/95 px-4 text-[0.95rem] font-semibold">
         <span className={`inline-block h-2.5 w-2.5 rounded-full ${live ? "bg-good" : "bg-soft"}`} aria-hidden="true" />
@@ -75,7 +75,7 @@ export function Banner({ id, text, onSee, onDone }: { id: string; text: string; 
   // the timer belongs to this banner (id), not to each live update re-render
   useEffect(() => { const h = window.setTimeout(() => done.current(), 8000); return () => window.clearTimeout(h); }, [id]);
   return (
-    <div className="fixed inset-x-0 top-14 z-40 flex justify-center px-3">
+    <div className="fixed inset-x-0 top-[5rem] z-40 flex justify-center px-3">
       <div role="alert" className="flex w-full max-w-[480px] items-center gap-3 rounded-2xl bg-warn px-4 py-3 text-night shadow-xl">
         <span className="flex-1 text-[1.05rem] font-bold">{text}</span>
         {onSee && (
@@ -86,4 +86,35 @@ export function Banner({ id, text, onSee, onDone }: { id: string; text: string; 
       </div>
     </div>
   );
+}
+
+/** Deviation warning (UPGRADE §7): one banner, gentle ("off") or strong ("far"). */
+export function DeviationBanner({ level, onNewWay, onFine, sms, onSos }: {
+  level: "off" | "far"; onNewWay: () => void; onFine: () => void; sms: string; onSos: () => void;
+}) {
+  const { t } = useT();
+  const far = level === "far";
+  const btn = "min-h-11 rounded-xl px-3 font-bold";
+  return (
+    <div className="fixed inset-x-0 top-[5rem] z-40 flex justify-center px-3">
+      <div role="alert" className={`w-full max-w-[480px] rounded-2xl px-4 py-3 shadow-xl ${far ? "bg-bad text-night" : "bg-warn text-night"}`}>
+        <p className="text-[1.1rem] font-bold">{t(far ? "line.farWay" : "line.offWay")}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button onClick={onNewWay} className={`${btn} bg-night text-ink`}>{t("label.newWay")}</button>
+          {far ? (
+            <>
+              <a href={sms} className={`${btn} flex items-center bg-night/80 text-ink`}>{t("label.callSomeone")}</a>
+              <button onClick={onSos} className={`${btn} bg-help text-white`}>{t("label.sos")}</button>
+            </>
+          ) : <button onClick={onFine} className={`${btn} border-2 border-night`}>{t("label.imFine")}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Small chip while the demo is moving time or location (never on a normal trip). */
+export function DemoChip() {
+  const { t } = useT();
+  return <span className="whitespace-nowrap rounded-full border border-warn/70 px-2.5 py-0.5 text-[0.85rem] font-semibold text-warn">{t("label.demoTime")}</span>;
 }

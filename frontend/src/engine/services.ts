@@ -66,14 +66,47 @@ export class OpenLayer {
 const good = (it: Item) => it.f.value === true && (it.st === "KNOWN" || it.st === "PROBABLE");
 const maybe = (it: Item) => (it.f.value === true && it.st !== "UNKNOWN") || it.st === "UNKNOWN";
 
-function nearest(xs: Float64Array, ys: Float64Array, pts: Item[]): [Float64Array, Int32Array] {
-  const d = new Float64Array(xs.length).fill(1e5);
-  const idx = new Int32Array(xs.length).fill(-1);
-  for (let i = 0; i < xs.length; i++) {
-    for (let k = 0; k < pts.length; k++) {
-      const dd = Math.hypot(pts[k].p.x - xs[i], pts[k].p.y - ys[i]);
-      if (dd < d[i]) { d[i] = dd; idx[i] = k; }
+/** Nearest point within NEAREST_CAP_M of every query, via a grid (was brute force: too slow for the
+ *  Nagpur + Butibori graph). Beyond the cap: 1e5 / -1. Every user saturates by 3 km (isolation at
+ *  ~760 m, emergency at 3000 m), so the cap changes no result. */
+const NEAREST_CAP_M = 3500, NEAREST_CELL_M = 500;
+export function nearest(xs: Float64Array, ys: Float64Array, pts: Item[]): [Float64Array, Int32Array] {
+  const n = xs.length;
+  const d = new Float64Array(n).fill(1e5);
+  const idx = new Int32Array(n).fill(-1);
+  if (!pts.length) return [d, idx];
+  const G = NEAREST_CELL_M, CAP = NEAREST_CAP_M;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const it of pts) { x0 = Math.min(x0, it.p.x); y0 = Math.min(y0, it.p.y); x1 = Math.max(x1, it.p.x); y1 = Math.max(y1, it.p.y); }
+  x0 -= CAP; y0 -= CAP; x1 += CAP; y1 += CAP;
+  const nx = Math.ceil((x1 - x0) / G) + 1, ny = Math.ceil((y1 - y0) / G) + 1;
+  const start = new Int32Array(nx * ny + 1);
+  const cellOf = (x: number, y: number) => Math.floor((y - y0) / G) * nx + Math.floor((x - x0) / G);
+  for (const it of pts) start[cellOf(it.p.x, it.p.y) + 1]++;
+  for (let c = 0; c < nx * ny; c++) start[c + 1] += start[c];
+  const items = new Int32Array(pts.length), fill = start.slice(0, nx * ny);
+  pts.forEach((it, k) => { items[fill[cellOf(it.p.x, it.p.y)]++] = k; });
+  const R = Math.ceil(CAP / G);
+  for (let i = 0; i < n; i++) {
+    const x = xs[i], y = ys[i];
+    if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+    const cx = Math.floor((x - x0) / G), cy = Math.floor((y - y0) / G);
+    let best = CAP, bi = -1;
+    for (let r = 0; r <= R && (r - 1) * G <= best; r++) {
+      for (let gy = cy - r; gy <= cy + r; gy++) {
+        if (gy < 0 || gy >= ny) continue;
+        const edge = gy === cy - r || gy === cy + r;
+        for (let gx = cx - r; gx <= cx + r; gx += edge ? 1 : 2 * r || 1) {
+          if (gx < 0 || gx >= nx) continue;
+          const c = gy * nx + gx;
+          for (let j = start[c]; j < start[c + 1]; j++) {
+            const k = items[j], dd = Math.hypot(pts[k].p.x - x, pts[k].p.y - y);
+            if (dd < best) { best = dd; bi = k; }
+          }
+        }
+      }
     }
+    if (bi >= 0) { d[i] = best; idx[i] = bi; }
   }
   return [d, idx];
 }

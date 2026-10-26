@@ -1,5 +1,1 @@
-{ "id": "main_road_closed", "name": "3. Main road closed", "seed": 42,
-  "description": "Police close the main road the cab way uses (02:16). Road info reports it and the plan re-routes.",
-  "request": { "from": "work", "to": "home", "finish": "02:15", "by": "03:00", "modes": ["walk", "cab"] },
-  "events": [{ "t": "02:16", "type": "road_closure", "params": { "edge_selector": "main_road_nearest_route" } }],
-  "expect": { "never_unknown_as_value": true, "always_has_plan": true, "plan_changed": true } }
+{ "id": "main_road_closed", "name": "3. Main road closed", "seed": 42, "description": "Police close the main road the walking way uses (02:16). Road info reports it and the plan re-routes around it.", "request": {"from": "work", "to": "home", "finish": "02:15", "by": "03:00", "modes": ["walk"]}, "events": [{"t": "02:16", "type": "road_closure", "params": {"edge_selector": "main_road_nearest_route"}}], "expect": {"never_unknown_as_value": true, "always_has_plan": true, "plan_changed": true}}

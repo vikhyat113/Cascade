@@ -1,0 +1,4 @@
+{ "id": "no_night_bus", "name": "10. No night bus (hours unknown)", "seed": 42,
+  "description": "Same trip at 02:00 with the real data: nobody knows if the estimated buses run at night. They are never promised; the app offers the Backup (wait somewhere safe) instead.",
+  "request": { "from": "start", "to": "Sitabuldi City Bus Stand", "finish": "02:00", "by": "03:30" }, "events": [], "end": "02:20",
+  "expect": { "never_unknown_as_value": true, "no_bus_promised": true, "backup_offered": true } }

@@ -1,7 +1,7 @@
 // NightWay demo dispatch server (spec §9). SIMULATED police / hospital / contact desks for the demo:
 // nothing here reaches real emergency services. One file, in-memory, port 8787.
 //
-//   POST /sos            { id, type, to, lat, lon, ts, via, hops }  -> { id, ok }
+//   POST /sos            { id, type, to (police|hospital|fire|contact), lat, lon, ts, via, hops }  -> { id, ok }
 //   GET  /sos/:id        -> { id, acked, ack, targets }
 //   POST /sos/:id/ack    { to?, by? }                               -> { id, acked }
 //   GET  /sos            -> all alerts            GET /events -> live list (SSE)
@@ -11,7 +11,7 @@ import os from "node:os";
 
 const PORT = Number(process.env.PORT || 8787);
 const TYPES = new Set(["danger", "medical", "unsure"]);
-const DESKS = new Set(["police", "hospital", "contact"]);
+const DESKS = new Set(["police", "hospital", "fire", "contact"]);
 const alerts = new Map();          // id -> alert
 const clients = new Set();         // SSE responses
 
@@ -42,7 +42,7 @@ app.post("/sos", (req, res) => {
   const id = String(b.id ?? "").slice(0, 32);
   const lat = num(b.lat), lon = num(b.lon);
   if (!id || lat === null || lon === null || !TYPES.has(b.type) || !DESKS.has(b.to)) {
-    return res.status(400).json({ error: "need id, type (danger|medical|unsure), to (police|hospital|contact), lat, lon" });
+    return res.status(400).json({ error: "need id, type (danger|medical|unsure), to (police|hospital|fire|contact), lat, lon" });
   }
   const now = Date.now();
   let a = alerts.get(id);
@@ -100,7 +100,7 @@ const DASHBOARD = `<!doctype html>
   a { color:var(--accent); }
 </style></head><body>
 <header><h1>NightWay dispatch</h1><span class="sim">SIMULATED · demo only · not real police or hospital</span><span class="m" id="st">connecting…</span></header>
-<nav><button data-desk="police">Police</button><button data-desk="hospital">Hospital</button><button data-desk="contact">Contact</button></nav>
+<nav><button data-desk="police">Police</button><button data-desk="hospital">Hospital</button><button data-desk="fire">Fire</button><button data-desk="contact">Contact</button></nav>
 <main id="list"></main>
 <script>
   const TYPE = { danger: "In danger", medical: "Needs a doctor", unsure: "Not sure" };

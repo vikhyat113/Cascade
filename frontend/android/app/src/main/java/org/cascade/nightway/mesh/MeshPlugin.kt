@@ -102,6 +102,7 @@ class MeshPlugin : Plugin(), BleMesh.Listener {
             .put("locationOn", locationOn)
             .put("permissions", perms)
             .put("running", BleMesh.running)
+            .put("serviceRunning", MeshService.running)
             .put("lastError", BleMesh.lastError))
     }
 

@@ -60,7 +60,7 @@ export function setRain(s: State, intensity: string | null): void {
 
 export function cancelTrip(s: State, routeId: string, tripId?: string | null): string | null {
   const now = s.now();
-  const all = tripsFor(s.world, now).trips;
+  const all = tripsFor(s.world, now, s.pretendNightBuses).trips;
   const first = tripId ? all.find((t) => t.id === tripId) : undefined;
   const pool = all.filter((t) => t.routeId === routeId && (!first || t.dir === first.dir) && t.times[0] >= (first ? first.times[0] : now - 20 * 60000))
     .sort((a, b) => a.times[0] - b.times[0]);

@@ -26,10 +26,12 @@ export class Engine {
   reset(clock: Clock = this.clock, warmup = true): void {
     const keepOnline = this.state?.online ?? true;
     const keepWeather = this.state?.realWeather ?? null;
+    const keepTraffic = this.state?.realTraffic ?? null;
     this.clock = clock;
     this.state = new State(this.world, clock, this.opts.seed);
     this.state.online = keepOnline;
     this.state.realWeather = keepWeather;
+    this.state.realTraffic = keepTraffic;
     this.feeds = new FeedSimulator(this.state, this.opts.live ?? true);
     this.cache = new OpenCache();
     this.replanner = new Replanner(this.state, this.cache);
@@ -104,7 +106,8 @@ export class Engine {
 
   /** Nearest help: police and hospital / clinic (with ways there). */
   help(lat: number, lon: number, lang: Lang) {
-    return { police: this.needNow("police", lat, lon, lang)[0] ?? null, hospital: this.needNow("doctor", lat, lon, lang)[0] ?? null };
+    const first = (kind: string, openOnly = false) => this.needNow(kind, lat, lon, lang).find((p) => !openOnly || p.state === "open" || p.state === "maybe_open") ?? null;
+    return { police: first("police"), hospital: first("doctor"), fire: first("fire"), place: first("people", true) };
   }
 
   // ---- demo controls --------------------------------------------------------------------------------
@@ -137,13 +140,34 @@ export class Engine {
     this.state.realWeather = f;
   }
 
+  /** HERE traffic flow samples (middle point + current/free-flow speed) -> one factor per traffic cell
+   *  (median). Returns how many of the area's traffic cells HERE covers. */
+  setRealTraffic(pts: { lat: number; lon: number; f: number }[], observedAt: number): number {
+    const w = this.world, g = w.tgrid, mine = new Set(w.trafficCells), by = new Map<number, number[]>();
+    for (const p of pts) {
+      const x = w.proj.x(p.lon), y = w.proj.y(p.lat);
+      if (x < g.xmin || y < g.ymin || x >= g.xmin + g.nx * g.size || y >= g.ymin + g.ny * g.size) continue;
+      const c = g.index(x, y);
+      if (!mine.has(c)) continue;
+      (by.get(c) ?? by.set(c, []).get(c)!).push(p.f);
+    }
+    const cells = new Map<number, number>();
+    for (const [c, fs] of by) { fs.sort((a, b) => a - b); cells.set(c, fs[fs.length >> 1]); }
+    if (!cells.size) return 0;
+    const first = !this.state.realTraffic;
+    this.state.realTraffic = { at: Math.min(observedAt, Date.now()), cells };
+    if (first) this.state.logEvent("source", `HERE traffic flow: ${cells.size} of ${mine.size} traffic cells covered (real)`);
+    return cells.size;
+  }
+
   trust(): { sources: SourceInfo[]; hours: Record<string, number>; events: { t: string; message: string; severity: string }[]; now: number } {
     const s = this.state;
     return {
       now: s.now(),
       sources: (Object.keys(SOURCES) as SourceId[]).map((id) => {
         const v = s.sourceView(id), c = SOURCES[id];
-        return { id, label: c.label, live: c.live, synthetic: c.synthetic, enabled: s.sources[id].enabled, status: v.status, confidence: v.confidence, ageS: v.ageS,
+        const label = id === "traffic" && s.realTrafficOn() ? "Traffic speeds (HERE live)" : c.label;
+        return { id, label, live: c.live, synthetic: s.synthetic(id), enabled: s.sources[id].enabled, status: v.status, confidence: v.confidence, ageS: v.ageS,
           reliability: c.reliability, ttlS: c.ttlS, history: s.sources[id].history.slice(-24).map((h) => h.status) };
       }),
       hours: hoursCoverage(s, s.now()),

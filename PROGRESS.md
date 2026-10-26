@@ -48,8 +48,61 @@
 - Native Capacitor plugin in Kotlin (`frontend/android/app/src/main/java/org/cascade/nightway/mesh/`), `BleMeshTransport` in `src/sos/ble.ts`, Demo drawer 9. Flag `MESH_REAL` off by default; any failure falls back to the simulated mesh.
 - Builds and all 56 tests pass. **Not yet verified between two phones**: steps in docs/BLE_STATUS.md; results to be recorded there.
 
+## UPGRADE (branch nightway-nagpur, see UPGRADE.md / UPGRADE_AUDIT.md)
+
+### U1: Nagpur and Butibori (done, tag up-1)
+- Area = 3 named zones in `data/area.geojson` (`scripts/area.py`): Nagpur core (4 km around Sitabuldi), Butibori + IIIT Nagpur (3.2 km), Wardha Road corridor (500 m along 25.3 km of NH-44, found by routing on OSM main roads).
+- Places geocoded once with Nominatim (`scripts/geocode_places.py`, cached). IIIT Nagpur's permanent campus is not named in OSM: Waranga village stands in (**to confirm**).
+- Rebuilt: walk graph (full detail in zones, major roads in the corridor; 13,872 segments: 933 km Nagpur, 142 km Butibori, 67 km corridor), drive graph (derived from it), POIs (272 hospitals, 26 metro stations, only 10 bus stops in OSM), weather (Nagpur), synthetic incidents. Bundle 2.5 MB.
+- App: "in the area" = inside / within 300 m of a zone; GPS outside → demo start (IIIT Nagpur); map pans within the zones + 3 km; Demo 5 location check names the zone.
+- Bus tests and scenarios 2/5 run along whatever bus route exists (`bus:start` / `bus:end`), so they test timetable logic, not one city's routes.
+- Checks: 56 app tests + 53 Python backend tests pass; browser run on the new city works (plan 0.9 s for IIIT → Dharampeth).
+- Unverified: planning time on the phone for the 25 km trip; Waranga as IIIT stand-in.
+
+### U5: SOS on every screen (done, tag up-5)
+- Red **SOS** button (56 px, top-right, above every sheet, banner, dialog and the Demo drawer) on every screen, including the loading screen. One tap opens Help at once; Call 112 is the first control; the danger / doctor / not sure choice inside the sheet is the only guard.
+- Place for help: a fresh GPS fix (5 s), else the last known place ("Using last place."), else "No place yet. Call 112." (the SMS then has no map link). A fix outside the zones keeps the app's (demo) place.
+- Status pill moved left, map credit under it, trip card and banners below the top row. No flag can hide SOS.
+- Tests: SOS unit test (label + screen-reader name in EN/HI, size, layer) and `npm run e2e` (Chrome, 360 px, EN + HI: first screen, home, about, demo drawer, search, open now, result, trip, help: visible, 56 px, not covered; Call 112 first). All pass.
+
+### U4: no cab; Metro + estimated buses; transfers (done, tag up-4)
+- Transit data search (docs/TRANSIT_DATA.md): OSM has **0 bus routes**, real **Metro** (Orange, Aqua: 06:00-22:00, every 15 min); no GTFS exists. Buses: estimated routes **E1-E4** (Butibori - Wardha Road - Sitabuldi; IIIT (Waranga) - Butibori; Railway Station - Sitabuldi - Dharampeth; Sadar - Sitabuldi - Ajni), hours **unknown**. Template `data/manual_bus_routes.csv` for real routes.
+- Cab removed everywhere in the app (old code in `legacy/frontend-app-cab/`).
+- Transfers: up to 2 changes ("Change here. Wait about 16 min."), change stops on the map, at most 4 steps + "More steps".
+- Unknown hours: "Not sure buses run now." + Backup (another way, or Safe places); never preferred over a way expected to work. Demo: "Pretend night buses run (simulated)".
+- Fixed while testing: brute-force nearest-place search (689 ms → 84 ms per slice); 27 km walk offered as Backup; the simulated bus feed ignored the pretend switch.
+- Checks: 64 app tests (new: no invented night service, transfers IIIT → Dharampeth < 1.5 s, change wording, unknown-hours warning, grid search = brute force) + 53 backend tests; browser run of IIIT → Home at 2:15 AM with and without pretending.
+- Unverified on the phone: planning time for the long trip.
+
+### U6: deviation warning (done, tag up-6)
+- `engine/deviation.ts`: distance + progress to the planned way, accuracy filter, hysteresis, off / far levels, snooze, "Are you OK?" when still at night. Banners: "You are off the way." (New way / I'm fine), "You are far from the way." (New way / Call someone / SOS). "New way" re-plans from the current fix.
+- Demo drawer 10: fake GPS "Walk the way" 1× / 10×, "Wander off" 80 / 300 m, "Demo time" chip.
+- Fixed while testing: Wander off kept walking alongside a winding way and kept coming back within 60 m (now a jump to a fixed spot); "far" was hidden by the 3-min snooze (now always shown).
+- Checks: 9 deviation tests (maths, jitter quiet, hysteresis, accuracy, far by distance / time, vehicle line, snooze, far during snooze, still) + re-plan from an off point; browser run: off after 24 s, I'm fine, far, New way; SOS e2e still passes.
+- Unverified on the phone: real GPS watch accuracy and battery during a trip.
+
+### U2: map layers (done, tag up-2)
+- Layers button + sheet: Streets lit, Safety heat (hour slider), Help places (open now / include not sure), Weather, Night lights; More: strength, moon light (computed), details in plain words. Lazy layer files.
+- Night lights from NASA satellite (public GIBS, median of 8 nights) + lighting prior for unmarked streets (PROBABLE only; lowers UNKNOWN share). Weather grid (Open-Meteo, 13 points). Thermal cut (documented).
+- Checks: 79 app tests (satellite prior: lowers UNKNOWN, never KNOWN, never overrides tags; moon new/full and up/down; heat cells and hours); browser run: all five layers on, lazy files fetched only on switch-on, no errors; SOS e2e passes.
+
+### U3: other ways (done, tag up-3)
+- Port of routing.py (Yen + comparison) with golden tests against the verbatim Python; one Python parsing bug found and documented.
+- Diverse walking ways (Yen + penalty top-up), cached per risk slice; "Other ways" sheet with colours on the map, best pick, plain reasons, close-choice note.
+- Fixed while testing: sheet size watcher read a removed sheet (page error); bus ways said "Could make you late" when the truth is unknown hours.
+- Checks: 92 app tests (11 golden); browser: Other ways sheet with 4 ways, pick one, no errors; SOS e2e passes.
+
+### U7: help ladder (done, tag up-7)
+- Police → hospital → fire station → open place with people (Take me there / Call); 20 s per step, 8 s in demo; step log in the Demo drawer; "Reached N phones" over the mesh; fire desk on the dispatch server; Bluetooth checklist shows the foreground service.
+- Checks: 94 app tests (order, demo step time, hospital fallback, no false "aware", Bluetooth codes incl. fire); browser: police silent → hospital acknowledges → "Help is aware" (9 s escalation); nobody answers → police, hospital, fire → "Go where people are" (24 s); no errors.
+
+### U8: HERE online extras (done, tag up-8)
+- HERE night tiles (credit "© HERE") → OSM → bundled roads; HERE traffic flow as a real, ageing traffic source (simulated and labelled when HERE has no coverage or refuses); HERE transit cross-check in Demo 11; request counter, throttling, 3 min memory cache; Demo tile test (HERE fails / all tiles fail).
+- Checks: 99 app tests (flow parsing, real vs simulated traffic, ageing, clock jump, area filter, tile chain with and without a key); browser with a dummy key and every HERE request stubbed: HERE credit, traffic "Known 85%, real", HERE fails → OSM, all fail → roads, back to HERE, transit "no HERE transit data here (noCoverage)", refused key → OSM + "traffic is simulated"; no errors.
+- Waiting for: the real HERE key in `frontend/.env.local` (then rebuild the APK).
+
 ## Commands
-- Tests: `cd frontend && npm test` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
+- Tests: `cd frontend && npm test` · SOS on every screen: `npm run build && npm run e2e` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 
 ## Commands (dispatch)
 - `cd server && npm install && npm start`, then put the printed Wi-Fi address in Demo → 8. Dispatch server.

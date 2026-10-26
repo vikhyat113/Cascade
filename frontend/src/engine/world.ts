@@ -7,21 +7,30 @@ import { Proj, Rng } from "./util";
 // ---- bundle shapes (written by tools/build_data.py) ----------------------------------------------
 export interface GraphJson {
   generated_at: string | null; nodes: [number, number][]; hw_codes: string[]; names: string[];
-  edges: { u: number[]; v: number[]; len: number[]; hw: number[]; lit: number[]; lamps: number[]; name: number[]; geom: number[][] };
+  edges: { u: number[]; v: number[]; len: number[]; hw: number[]; lit: number[]; lamps: number[]; name: number[]; geom: number[][]; ntl?: number[] };
 }
 export interface PoiJson { id: string; type: string; name: string | null; lat: number; lon: number; opening_hours: string | null; phone: string | null; emergency?: string | null; edited_at: string | null }
 export interface PlaceJson { name: string; lat: number; lon: number; kind: string }
 export interface WeatherJson { fetched_at: string | null; hourly: Record<string, (number | null)[] | string[] | undefined> & { time: string[] } }
 export interface IncidentsJson { grid: { xmin: number; ymin: number; size: number; nx: number; ny: number }; risk: Record<string, number[]> }
-export interface RouteJson { id: string; name: string; mode: string; color?: string; stops: { id: string; name: string; lat: number; lon: number }[]; seg_s: number[]; service: { from: string; to: string; headway_min: number }[]; both_directions?: boolean; note?: string }
+export interface RouteJson {
+  id: string; name: string; mode: string; color?: string; stops: { id: string; name: string; lat: number; lon: number; est?: boolean }[]; seg_s: number[];
+  service: { from: string; to: string; headway_min: number }[]; both_directions?: boolean; note?: string;
+  hours_known?: boolean; headway_min?: number | null; source?: "osm" | "manual" | "estimated"; synthetic?: boolean;
+}
 export interface ScheduleJson { generated_at: string | null; synthetic: boolean; routes: RouteJson[] }
 export interface MetaJson {
   city_name: string; center: { lat: number; lon: number }; radius_m: number; tz_offset_min: number; seed: number;
+  zones?: Zone[];            // the area is named zones (data/area.geojson); center/radius only enclose them
   ui_defaults: { home: { lat: number; lon: number; name: string }; work: { lat: number; lon: number; name: string }; start: { lat: number; lon: number; name: string }; deadline: string | null };
   generated_at: string; sample: boolean; real: string[]; synthetic: string[];
 }
+export interface Zone { id: string; name: string; detail: "full" | "major"; ring: [number, number][] }
+export interface AreaHit { inside: boolean; distM: number; zone: string | null }
+
 export interface Bundle { graph: GraphJson; pois: PoiJson[]; places: PlaceJson[]; weather: WeatherJson; incidents: IncidentsJson; schedule: ScheduleJson; meta: MetaJson }
 
+export const LIGHT_SRC = { mapped: 0, mainRoad: 1, satellite: 2, none: 3 } as const;
 export const MAIN = new Set(["motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link"]);
 const MINOR = new Set(["residential", "unclassified", "living_street", "service", "road"]);
 const NO_CARS = new Set(["footway", "path", "pedestrian", "steps", "track", "cycleway", "bridleway", "corridor"]);
@@ -32,8 +41,12 @@ export const ACTIVITY = new Set(["hospital", "police", "fire_station", "fuel", "
 export const EMERGENCY = new Set(["hospital", "police"]);
 
 export interface Poi { id: string; type: string; name: string; lat: number; lon: number; x: number; y: number; hours: string | null; phone: string | null; emergency: boolean; editedAt: number | null }
-export interface Stop { id: string; name: string; lat: number; lon: number; x: number; y: number }
-export interface Route { id: string; name: string; mode: string; color: string; stops: Stop[]; segS: number[]; service: RouteJson["service"]; both: boolean; note: string }
+export interface Stop { id: string; name: string; lat: number; lon: number; x: number; y: number; est?: boolean }
+/** `hoursKnown` false: when the route runs is not known (UNKNOWN), never invented (UPGRADE §5.3). */
+export interface Route {
+  id: string; name: string; mode: string; color: string; stops: Stop[]; segS: number[]; service: RouteJson["service"]; both: boolean; note: string;
+  hoursKnown: boolean; headwayMin: number | null; source: string; synthetic: boolean;
+}
 
 export class Grid {
   nx: number; ny: number;
@@ -59,11 +72,13 @@ export class World {
   m: number; eu: Int32Array; ev: Int32Array; elen: Float64Array; ehw: string[]; ename: (string | null)[]; egeom: number[][];
   emx: Float64Array; emy: Float64Array; isMain: Uint8Array; carOk: Uint8Array; ttFree: Float64Array;
   lightLo: Float32Array; lightHi: Float32Array; lightCode: Uint8Array; lightConf: Float32Array;
-  isoBase: Float32Array; walkTraffic: Float32Array; cell: Int32Array; tcell: Int32Array; czone: Int32Array;
+  lightSrc: Uint8Array;              // where the lighting estimate comes from: LIGHT_SRC
+  ntl: Int16Array;                   // night lights from satellite, 0-255 (-1 = none)
   // places
   pois: Poi[]; facilities: Poi[]; places: { name: string; norm: string; lat: number; lon: number; kind: string }[];
   // models
-  incGrid: Grid; incRisk: Map<number, Float32Array>; tgrid: Grid; cgrid: Grid; zoneDensity: Float32Array;
+  isoBase: Float32Array; walkTraffic: Float32Array; cell: Int32Array; tcell: Int32Array;
+  incGrid: Grid; incRisk: Map<number, Float32Array>; tgrid: Grid;
   trafficCells: number[]; trafficBias: Float32Array; floodEdges: number[];
   routes: Map<string, Route>; scheduleGeneratedAt: number | null; scheduleSynthetic: boolean;
   weatherRows: Map<string, Record<string, number | null>>; weatherFetchedAt: number | null;
@@ -111,13 +126,18 @@ export class World {
     this.emx = new Float64Array(m); this.emy = new Float64Array(m);
     this.isMain = new Uint8Array(m); this.carOk = new Uint8Array(m); this.ttFree = new Float64Array(m);
     this.lightLo = new Float32Array(m); this.lightHi = new Float32Array(m); this.lightCode = new Uint8Array(m); this.lightConf = new Float32Array(m);
+    this.lightSrc = new Uint8Array(m);
+    this.ntl = Int16Array.from(E.ntl ?? new Array(m).fill(-1));
+    const R = CONFIG.risk;
     this.isoBase = new Float32Array(m); this.walkTraffic = new Float32Array(m);
     const osm = SOURCES.osm_map;
     const osmFact: Fact = { key: "osm_map", value: "ok", source: "osm_map", synthetic: false, observedAt: this.mapAt, ttlS: osm.ttlS, reliability: osm.reliability, kind: "observed" };
     const priorFact: Fact = { key: "prior:lighting", value: "main roads usually lit", source: "prior", synthetic: false, observedAt: this.mapAt, ttlS: osm.ttlS, reliability: 0.5, kind: "prior" };
     const at = Date.now();
     const osmSt = status(osmFact, at), osmC = confidence(osmFact, at), prSt = status(priorFact, at), prC = confidence(priorFact, at);
-    const set = (e: number, lo: number, hi: number, st: Status, c: number) => { this.lightLo[e] = lo; this.lightHi[e] = hi; this.lightCode[e] = CODE[st]; this.lightConf[e] = c; };
+    const satFact: Fact = { key: "prior:viirs", value: "night lights from satellite", source: "prior", synthetic: false, observedAt: this.mapAt, ttlS: osm.ttlS, reliability: 0.45, kind: "prior" };
+    const satSt = status(satFact, at), satC = confidence(satFact, at);
+    const set = (e: number, lo: number, hi: number, st: Status, c: number, src: number = LIGHT_SRC.none) => { this.lightLo[e] = lo; this.lightHi[e] = hi; this.lightCode[e] = CODE[st]; this.lightConf[e] = c; this.lightSrc[e] = src; };
     for (let e = 0; e < m; e++) {
       const g = this.egeom[e];
       const k = Math.floor(g.length / 4) * 2;           // middle vertex (flat lat,lon list)
@@ -129,9 +149,14 @@ export class World {
       this.carOk[e] = NO_CARS.has(hw) ? 0 : 1;
       this.ttFree[e] = this.elen[e] / ((KPH[hw.replace("_link", "")] ?? 25) / 3.6);
       const lit = E.lit[e];
-      if (lit === 1 || E.lamps[e] >= 1) set(e, 0.05, 0.2, osmSt, osmC);         // mapped lit / lamps nearby
-      else if (lit === 0) set(e, 0.8, 1.0, osmSt, osmC);                         // mapped unlit
-      else if (MAIN.has(hw)) set(e, 0.15, 0.6, prSt, prC);                       // prior: main roads usually lit
+      const sat = this.ntl[e];
+      if (lit === 1 || E.lamps[e] >= 1) set(e, 0.05, 0.2, osmSt, osmC, LIGHT_SRC.mapped);         // mapped lit / lamps nearby
+      else if (lit === 0) set(e, 0.8, 1.0, osmSt, osmC, LIGHT_SRC.mapped);                         // mapped unlit
+      else if (MAIN.has(hw)) set(e, 0.15, 0.6, prSt, prC, LIGHT_SRC.mainRoad);                     // prior: main roads usually lit
+      else if (R.viirsPrior && sat >= 0) {                                                         // prior: satellite (never KNOWN)
+        const [lo, hi] = R.viirsRisk[sat >= R.viirsBright ? "bright" : sat >= R.viirsDark ? "mid" : "dark"];
+        set(e, lo, hi, satSt, satC, LIGHT_SRC.satellite);
+      }
       else if (MINOR.has(hw)) set(e, 0.25, 0.9, "UNKNOWN", 0);                   // no data: wide interval, no value
       else set(e, 0.35, 1.0, "UNKNOWN", 0);
       this.isoBase[e] = CLASS_ISO[hw] ?? 0.45;
@@ -151,24 +176,17 @@ export class World {
     this.incGrid = new Grid(ig.xmin, ig.ymin, ig.size, ig.nx, ig.ny);
     this.incRisk = new Map(Object.entries(bundle.incidents.risk).map(([h, v]) => [Number(h), Float32Array.from(v)]));
     const half = meta.radius_m + 600;
-    this.cell = new Int32Array(m); this.tcell = new Int32Array(m); this.czone = new Int32Array(m);
+    this.cell = new Int32Array(m); this.tcell = new Int32Array(m);
     this.tgrid = new Grid(-half, -half, CONFIG.risk.trafficCellM, undefined, undefined, half);
-    this.cgrid = new Grid(-half, -half, CONFIG.risk.cabZoneM, undefined, undefined, half);
     const cells = new Set<number>();
     for (let e = 0; e < m; e++) {
       this.cell[e] = this.incGrid.index(this.emx[e], this.emy[e]);
       this.tcell[e] = this.tgrid.index(this.emx[e], this.emy[e]);
-      this.czone[e] = this.cgrid.index(this.emx[e], this.emy[e]);
       if (this.carOk[e]) cells.add(this.tcell[e]);
     }
     this.trafficCells = [...cells].sort((a, b) => a - b);
     const rng = new Rng(meta.seed);
     this.trafficBias = Float32Array.from({ length: this.tgrid.n }, () => rng.uniform(0.9, 1.05));
-    const dens = new Float32Array(this.cgrid.n);
-    for (const p of this.facilities) dens[this.cgrid.index(p.x, p.y)] += 1;
-    const pos = [...dens].filter((v) => v > 0).sort((a, b) => a - b);
-    const scale = Math.max(1, pos.length ? pos[Math.floor(pos.length * 0.75)] : 1);
-    this.zoneDensity = dens.map((v) => v / scale);
     // a few synthetic waterlogging-prone spots (heavy rain closes them)
     const cand: number[] = []; for (let e = 0; e < m; e++) if (["residential", "tertiary", "secondary", "unclassified"].includes(this.ehw[e])) cand.push(e);
     const seeds = Array.from({ length: Math.min(7, cand.length) }, () => cand[Math.floor(rng.next() * cand.length)]);
@@ -182,7 +200,9 @@ export class World {
     this.routes = new Map();
     for (const r of sch.routes || []) {
       if (!r.stops || r.stops.length < 2 || r.seg_s.length !== r.stops.length - 1) continue;
-      this.routes.set(r.id, { id: r.id, name: r.name, mode: r.mode || "bus", color: r.color || "#f59e0b", segS: r.seg_s, service: r.service, both: r.both_directions !== false, note: r.note || "",
+      const hoursKnown = r.hours_known ?? (r.service?.length ?? 0) > 0;
+      this.routes.set(r.id, { id: r.id, name: r.name, mode: r.mode || "bus", color: r.color || "#f59e0b", segS: r.seg_s, service: r.service ?? [], both: r.both_directions !== false, note: r.note || "",
+        hoursKnown, headwayMin: r.headway_min ?? r.service?.[0]?.headway_min ?? null, source: r.source ?? "estimated", synthetic: r.synthetic ?? sch.synthetic !== false,
         stops: r.stops.map((s) => ({ ...s, x: this.proj.x(s.lon), y: this.proj.y(s.lat) })) });
     }
 
@@ -260,7 +280,42 @@ export class World {
     return out;
   }
 
-  inArea(lat: number, lon: number): boolean { return Math.hypot(this.proj.x(lon), this.proj.y(lat)) <= this.meta.radius_m + 300; }
+  inArea(lat: number, lon: number): boolean { return this.areaHit(lat, lon).distM <= CONFIG.area.nearM; }
+
+  /** Inside a zone (distance 0), else how far to the nearest zone edge. No zones: the old circle. */
+  areaHit(lat: number, lon: number): AreaHit {
+    const zones = this.meta.zones ?? [];
+    const x = this.proj.x(lon), y = this.proj.y(lat);
+    if (!zones.length) {
+      const d = Math.max(0, Math.hypot(x, y) - this.meta.radius_m);
+      return { inside: d === 0, distM: d, zone: null };
+    }
+    let best: AreaHit = { inside: false, distM: Infinity, zone: null };
+    for (const z of zones) {
+      const pts = z.ring.map(([la, lo]) => [this.proj.x(lo), this.proj.y(la)] as const);
+      let inside = false, d = Infinity;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const [xi, yi] = pts[i], [xj, yj] = pts[j];
+        if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+        const dx = xj - xi, dy = yj - yi, L2 = dx * dx + dy * dy;
+        const k = L2 ? Math.max(0, Math.min(1, ((x - xi) * dx + (y - yi) * dy) / L2)) : 0;
+        d = Math.min(d, Math.hypot(x - xi - k * dx, y - yi - k * dy));
+      }
+      if (inside) return { inside: true, distM: 0, zone: z.name };
+      if (d < best.distM) best = { inside: false, distM: d, zone: z.name };
+    }
+    return best;
+  }
+
+  /** [south, west, north, east] around every zone (map pan limit). */
+  bbox(): [number, number, number, number] {
+    const pts = (this.meta.zones ?? []).flatMap((z) => z.ring);
+    if (!pts.length) {
+      const dLat = this.meta.radius_m / 110540, dLon = this.meta.radius_m / (111320 * Math.cos((this.meta.center.lat * Math.PI) / 180));
+      return [this.meta.center.lat - dLat, this.meta.center.lon - dLon, this.meta.center.lat + dLat, this.meta.center.lon + dLon];
+    }
+    return [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
+  }
 
   // ---- offline search -----------------------------------------------------------------------------
   geocode(q: string, limit = 6): { name: string; lat: number; lon: number; kind: string }[] {
@@ -269,7 +324,7 @@ export class World {
     const nums = nq.match(/\d+/g) ?? [];
     const scored: [number, (typeof this.places)[number]][] = [];
     for (const p of this.places) {
-      if (nums.length && !nums.every((n) => (p.norm.match(/\d+/g) ?? ([] as string[])).includes(n))) continue;  // "sector 12" never becomes "sector 18"
+      if (nums.length && !nums.every((n) => (p.norm.match(/\d+/g) ?? ([] as string[])).includes(n))) continue;  // "plot 12" must never become "plot 18"
       let s = p.norm === nq ? 3 : p.norm.startsWith(nq) ? 2.2 : p.norm.includes(nq) ? 1.8 : 0;
       if (!s) { const words = nq.split(" "); s = words.every((w) => p.norm.includes(w)) ? 1.4 : 0; }
       if (!s) continue;

@@ -10,38 +10,41 @@ from __future__ import annotations
 
 import sys
 
+import area
 from common import CFG, DATA, overpass, utc_now_iso, write_json
 
-LAT, LON, R = CFG["center"]["lat"], CFG["center"]["lon"], CFG["radius_m"]
-A = f"(around:{R},{LAT},{LON})"
+R = CFG["radius_m"]
 
-QUERY = f"""
-[out:json][timeout:170];
-(
-  nwr["amenity"~"^(hospital|clinic|doctors|pharmacy|police|fire_station|fuel|atm|bank|cafe|fast_food|restaurant|bus_station|toilets)$"]{A};
+
+def zone_query() -> str:
+    """One Overpass query over every zone polygon (UPGRADE §2: the area is zones, not a circle)."""
+    parts = []
+    for _, poly in area.polygons():
+        A = f"({area.overpass_poly(poly)})"
+        parts.append(f"""
+  nwr["amenity"~"^(hospital|clinic|doctors|pharmacy|police|fire_station|fuel|atm|bank|cafe|fast_food|restaurant|bus_station|toilets|hotel)$"]{A};
+  nwr["tourism"~"^(hotel|guest_house)$"]{A};
   nwr["healthcare"~"^(hospital|clinic|pharmacy)$"]{A};
   nwr["shop"~"^(convenience|supermarket|chemist|bakery|kiosk)$"]{A};
   node["highway"="bus_stop"]{A};
-  nwr["public_transport"="station"]{A};
-  nwr["railway"~"^(station|subway_entrance)$"]{A};
+  nwr["public_transport"~"^(station|platform|stop_position)$"]{A};
+  nwr["railway"~"^(station|subway_entrance|halt)$"]{A};
   node["highway"="street_lamp"]{A};
-  node["place"~"^(suburb|neighbourhood|quarter|locality|village|hamlet)$"]{A};
+  node["place"~"^(suburb|neighbourhood|quarter|locality|village|hamlet|town)$"]{A};
   way["place"~"^(suburb|neighbourhood|quarter|locality)$"]{A};
-  way["landuse"="industrial"]{A};
-);
-out center meta;
-"""
+  way["landuse"="industrial"]{A};""")
+    return "[out:json][timeout:170];\n(" + "".join(parts) + "\n);\nout center meta;\n"
 
 
 def category(t: dict) -> str | None:
     a, s, hc = t.get("amenity"), t.get("shop"), t.get("healthcare")
     if t.get("highway") == "street_lamp":
         return "street_lamp"
-    if t.get("highway") == "bus_stop" or a == "bus_station":
+    if t.get("highway") == "bus_stop" or a == "bus_station" or             (t.get("public_transport") in ("platform", "stop_position") and (t.get("bus") == "yes" or t.get("highway") == "bus_stop")):
         return "bus_stop"
     if t.get("railway") in ("station", "subway_entrance") or t.get("public_transport") == "station":
         if t.get("station") == "subway" or t.get("subway") == "yes" or "metro" in (t.get("name") or "").lower() \
-                or t.get("railway") == "subway_entrance" or t.get("network", "").lower().startswith("delhi metro"):
+                or t.get("railway") == "subway_entrance" or "metro" in t.get("network", "").lower():
             return "metro_station"
         return "rail_station"
     if t.get("place"):
@@ -56,6 +59,8 @@ def category(t: dict) -> str | None:
         return "pharmacy"
     if a in ("police", "fire_station", "fuel", "atm", "bank", "toilets"):
         return a
+    if a == "hotel" or t.get("tourism") in ("hotel", "guest_house"):
+        return "hotel"
     if a in ("cafe", "fast_food", "restaurant") or s == "bakery":
         return "food"
     if s in ("convenience", "supermarket", "kiosk"):
@@ -64,12 +69,13 @@ def category(t: dict) -> str | None:
 
 
 KEEP_TAGS = ("name", "opening_hours", "emergency", "amenity", "shop", "healthcare", "brand",
-             "operator", "addr:street", "route_ref", "network", "station", "lit", "place")
+             "operator", "addr:street", "route_ref", "network", "station", "lit", "place", "phone", "contact:phone",
+             "tourism", "public_transport", "bus", "railway")
 
 
 def main():
     force = "--force" in sys.argv
-    data = overpass(QUERY, "overpass_pois.json", force=force)
+    data = overpass(zone_query(), "overpass_pois.json", force=force)
     out, seen = [], set()
     for e in data.get("elements", []):
         t = e.get("tags", {})

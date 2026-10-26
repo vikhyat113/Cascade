@@ -1,0 +1,15 @@
+{
+ "_note": "Cab strings removed from the app's copy deck in UPGRADE U4; only the Python reference backend (which still has a cab mode) uses them.",
+ "en": {
+  "fmt.cabTo": "Cab to {place}",
+  "fmt.waitCab": "Wait for your cab",
+  "line.cabGuess": "Cab wait is a guess.",
+  "line.noBusTryCab": "No bus now. Try a cab."
+ },
+ "hi": {
+  "fmt.cabTo": "कैब से {place} तक",
+  "fmt.waitCab": "कैब का इंतज़ार",
+  "line.cabGuess": "कैब का इंतज़ार अंदाज़ा है।",
+  "line.noBusTryCab": "अभी बस नहीं। कैब लें।"
+ }
+}

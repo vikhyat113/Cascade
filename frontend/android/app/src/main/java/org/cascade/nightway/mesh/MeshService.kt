@@ -16,6 +16,7 @@ class MeshService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        running = true
         val title = intent?.getStringExtra("title") ?: "NightWay"
         val text = intent?.getStringExtra("text") ?: ""
         val nm = getSystemService(NotificationManager::class.java)
@@ -36,6 +37,7 @@ class MeshService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
         BleMesh.stop()
         super.onDestroy()
     }
@@ -43,5 +45,6 @@ class MeshService : Service() {
     companion object {
         const val CHANNEL = "nightway-mesh"
         const val NOTE_ID = 4343
+        @Volatile var running = false        // for the pre-flight check (MeshPlugin.diagnose)
     }
 }

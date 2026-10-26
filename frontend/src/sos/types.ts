@@ -1,8 +1,9 @@
 // Help (SOS) shapes shared by the ladder, the mesh transports and the dispatch client (spec §9, §10).
 export type SosType = "danger" | "medical" | "unsure";
-export type Desk = "police" | "hospital" | "contact";
+export type Desk = "police" | "hospital" | "fire" | "contact";
 
-/** Fits a BLE advertisement in Phase 7: id 4 B, type+ttl+hop 2 B, lat/lon int32, ts 4 B; `to` takes 2 bits of the type byte. */
+/** Fits a BLE advertisement in Phase 7: id 4 B, type+ttl+hop 2 B, lat/lon int32, ts 4 B; `to` takes 2 bits of the type byte
+ *  (police, hospital, contact, fire; a test packet is an `ack` to code 3, see sos/ble.ts). */
 export interface SosPacket { id: number; type: SosType | "ack"; lat: number; lon: number; ts: number; hop: number; ttl: number; to?: Desk }
 
 export interface MeshTransport {

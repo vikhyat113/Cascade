@@ -8,7 +8,7 @@ import type { Desk, Dispatch, MeshTransport, SosPacket, SosType } from "./types"
 
 type Wire = { id: number; type: number; to: number; ttl: number; hop: number; lat: number; lon: number; ts: number };
 export type Diagnosis = { model: string; android: number; hasBle: boolean; bluetoothOn: boolean; canAdvertise: boolean; locationOn: boolean;
-  permissions: Record<string, string>; running: boolean; lastError: string | null };
+  permissions: Record<string, string>; running: boolean; serviceRunning?: boolean; lastError: string | null };
 type NativeStatus = { running: boolean; peers: number; relayed: number; sent: number; lastPacketAt: number | null };
 interface MeshNative {
   start(o: { title: string; text: string }): Promise<NativeStatus>;
@@ -23,7 +23,7 @@ const Native = registerPlugin<MeshNative>("Mesh");
 
 // 2-bit codes in the packet's type byte (see BleMesh.kt)
 const TYPES: (SosType | "ack")[] = ["danger", "medical", "unsure", "ack"];
-const TO: (Desk | "test")[] = ["police", "hospital", "contact", "test"];
+const TO: Desk[] = ["police", "hospital", "contact", "fire"];
 
 export interface Heard { t: number; type: string; to: string; id: number; hop: number; rssi: number }
 
@@ -71,7 +71,7 @@ export class BleMeshTransport implements MeshTransport {
   /** A packet that is relayed and shown, but never posted to the dispatch server (two-phone check). */
   sendTest(at: { lat: number; lon: number }): void {
     const id = Math.floor(Math.random() * 2 ** 31) + 1;
-    Native.broadcast({ id, type: 2, to: 3, ttl: CONFIG.mesh.ttl, hop: 0, lat: at.lat, lon: at.lon, ts: Math.round(Date.now() / 1000) })
+    Native.broadcast({ id, type: 3, to: 3, ttl: CONFIG.mesh.ttl, hop: 0, lat: at.lat, lon: at.lon, ts: Math.round(Date.now() / 1000) })
       .then((s) => { this.stats = s; this.log(`test packet ${id} sent`); }).catch((e) => this.log(`test failed: ${e?.message ?? e}`));
   }
   onReceive(cb: (p: SosPacket) => void): () => void { this.cbs.add(cb); return () => { this.cbs.delete(cb); }; }
@@ -81,10 +81,12 @@ export class BleMeshTransport implements MeshTransport {
   static wire(p: SosPacket): Wire {
     return { id: p.id, type: TYPES.indexOf(p.type), to: TO.indexOf(p.to ?? "police"), ttl: p.ttl, hop: p.hop, lat: p.lat, lon: p.lon, ts: p.ts };
   }
+  /** Code 3 is the fire desk for help packets; an `ack` to code 3 is a test packet (relayed, never posted). */
   static unwire(w: Wire): { packet: SosPacket | null; to: Desk | "test" } {
-    const to = TO[w.to] ?? "police";
     const type = TYPES[w.type] ?? "unsure";
-    return { to, packet: to === "test" ? null : { id: w.id, type, to, lat: w.lat, lon: w.lon, ts: w.ts, hop: w.hop, ttl: w.ttl } };
+    if (type === "ack" && w.to === 3) return { to: "test", packet: null };
+    const to = TO[w.to] ?? "police";
+    return { to, packet: { id: w.id, type, to, lat: w.lat, lon: w.lon, ts: w.ts, hop: w.hop, ttl: w.ttl } };
   }
   private static key(p: SosPacket) { return `${p.type}:${p.id}:${p.to ?? ""}`; }
 

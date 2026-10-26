@@ -1,15 +1,18 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { useT } from "../copy";
 import { Chevron, PLACE_ICON, SAFETY, STATE, STEP_ICON, TIMING } from "../components/icons";
 import { BackButton, BigButton, Sheet } from "../components/ui";
 import type { Option, Step } from "../types";
 import { SheetFooter } from "./Home";
 
+/** Icon steps: at most 4, then "More steps" (long trips with changes, UPGRADE §5.4). */
 export function Steps({ steps }: { steps: Step[] }) {
   const { t } = useT();
+  const [all, setAll] = useState(false);
+  const shown = all || steps.length <= 4 ? steps : steps.slice(0, 4);
   return (
     <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2" aria-label={t("label.steps")}>
-      {steps.map((s, i) => (
+      {shown.map((s, i) => (
         <Fragment key={i}>
           {i > 0 && <li aria-hidden="true" className="text-soft">→</li>}
           <li className="flex items-center gap-1 rounded-xl bg-raised px-2.5 py-1.5 text-[1.05rem] font-semibold" title={s.text}>
@@ -20,6 +23,9 @@ export function Steps({ steps }: { steps: Step[] }) {
           </li>
         </Fragment>
       ))}
+      {shown.length < steps.length && (
+        <li><button onClick={() => setAll(true)} className="min-h-11 rounded-xl px-2 font-semibold text-accent underline-offset-4 hover:underline">{t("label.moreSteps")}</button></li>
+      )}
     </ol>
   );
 }
@@ -27,7 +33,8 @@ export function Steps({ steps }: { steps: Step[] }) {
 export function WarningLine({ option, onBackup }: { option: Option; onBackup: (id: string) => void }) {
   const { t } = useT();
   const w = option.warning;
-  const backup = w?.backup_option_id ?? (option.timing === "too_late" ? option.backup_option_id : null);
+  // no other way runs: the Backup is waiting somewhere safe ("safe" opens the safe places list)
+  const backup = w?.backup_option_id ?? (w?.safe_wait ? "safe" : null) ?? (option.timing === "too_late" ? option.backup_option_id : null);
   if (!w && !backup) return null;
   return (
     <div className="mt-3 flex items-center gap-2 rounded-2xl border border-warn/50 bg-warn/10 px-3 py-2.5">
@@ -47,9 +54,9 @@ export function WarningLine({ option, onBackup }: { option: Option; onBackup: (i
   );
 }
 
-export function Result({ options, shown, onTab, onBackup, onStart, onBack, showPlaces, setShowPlaces, starting, lateAlert, setLateAlert, showDemo, onDemo, onHeight }: {
+export function Result({ options, shown, onTab, onBackup, onStart, onBack, showPlaces, setShowPlaces, starting, lateAlert, setLateAlert, onOtherWays, showDemo, onDemo, onHeight }: {
   options: Option[]; shown: Option; onTab: (id: string) => void; onBackup: (id: string) => void; onStart: () => void;
-  lateAlert: boolean; setLateAlert: (v: boolean) => void;
+  lateAlert: boolean; setLateAlert: (v: boolean) => void; onOtherWays: (() => void) | null;
   onBack: () => void; showPlaces: boolean; setShowPlaces: (v: boolean) => void; starting: boolean;
   showDemo: boolean; onDemo: () => void; onHeight: (h: number) => void;
 }) {
@@ -98,6 +105,12 @@ export function Result({ options, shown, onTab, onBackup, onStart, onBack, showP
       )}
 
       <div className="mt-4"><BigButton onClick={onStart} disabled={starting}>{t("label.start")}</BigButton></div>
+
+      {onOtherWays && (
+        <button onClick={onOtherWays} className="mt-3 flex min-h-11 items-center gap-1 font-semibold text-accent underline-offset-4 hover:underline">
+          {t("label.otherWays")} <Chevron dir="right" />
+        </button>
+      )}
 
       {shown.places.length > 0 && (
         <div className="mt-3">

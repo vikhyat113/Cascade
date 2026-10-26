@@ -19,6 +19,7 @@ export class FeedSimulator {
     for (const sid of LIVE_SOURCES) {
       const src = s.sources[sid], cfg = SOURCES[sid];
       if (!s.liveOn(sid)) continue;
+      if (sid === "traffic" && s.realTrafficOn()) { this.realTraffic(); continue; }
       if (src.burstUntil && now < src.burstUntil) continue;
       if (s.rng.next() < (cfg.dropout ?? 0)) continue;
       if (this.bursts && s.rng.next() < 0.003) { src.burstUntil = now + s.rng.uniform(60, 200) * 1000; continue; }
@@ -42,7 +43,7 @@ export class FeedSimulator {
   }
 
   private activeTrips(now: number) {
-    return tripsFor(this.s.world, now).trips.filter((t) => t.times[0] >= now - 45 * 60000 && t.times[0] <= now + 60 * 60000);
+    return tripsFor(this.s.world, now, this.s.pretendNightBuses).trips.filter((t) => t.times[0] >= now - 45 * 60000 && t.times[0] <= now + 60 * 60000);
   }
 
   private evolveTruth(now: number, dtS: number): void {
@@ -61,6 +62,17 @@ export class FeedSimulator {
       tr.lifted.set("flood", [now, tr.closures.get("flood")!]);
       tr.closures.delete("flood");
     }
+  }
+
+  /** HERE traffic flow (UPGRADE §9): real readings for the cells HERE covers, observed when HERE says.
+   *  Cells it does not cover get no reading (they become "not sure"), never a simulated one. */
+  private realTraffic(): void {
+    const s = this.s, r = s.realTraffic!, c = SOURCES.traffic;
+    for (const [cell, f] of r.cells) {
+      s.put({ key: `traffic:cell:${cell}`, value: { speed_factor: f }, source: "traffic", synthetic: false, observedAt: r.at,
+        ttlS: s.ttlOf("traffic"), reliability: c.reliability, kind: "observed", note: "HERE traffic flow" });
+    }
+    s.sources.traffic.lastOk = r.at;
   }
 
   private emit(sid: SourceId, obs: number, now: number): void {

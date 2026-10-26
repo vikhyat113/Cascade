@@ -47,6 +47,7 @@ body {
 .leaflet-control-attribution { font-size: 11px !important; background: color-mix(in srgb, var(--color-night) 70%, transparent) !important; color: var(--color-soft) !important; }
 .leaflet-control-attribution a { color: var(--color-soft) !important; }
 .leaflet-div-icon { background: transparent; border: none; }
+.leaflet-top.leaflet-left { top: 3.25rem; }    /* the credit sits under the status pill */
 
 @keyframes nw-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-me) 70%, transparent); } 100% { box-shadow: 0 0 0 14px transparent; } }
 .nw-me { width: 18px; height: 18px; border-radius: 50%; background: var(--color-me); border: 3px solid var(--color-ink); animation: nw-pulse 2s infinite; }

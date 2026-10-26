@@ -30,16 +30,65 @@ describe("planner on the bundled city", () => {
     expect(fastest.durationMin.expected!).toBeLessThanOrEqual(safest.durationMin.expected!);
   });
 
-  it("falls back to the timetable when bus info dies", () => {
+  it("falls back to the timetable when bus info dies (simulated night buses)", () => {
     const e = testEngine();
+    e.state.pretendNightBuses = true;
     e.outage("transit_realtime", false);
     e.advance(120 * 11);
-    const { all } = planFull(e.state, workHome(e, { modes: ["walk", "bus"], finish: "02:20", by: "03:30" }), e.cache);
+    const { all } = planFull(e.state, workHome(e, { modes: ["walk", "bus"], finish: "02:20", by: "03:30", along: "bus" }), e.cache);
     const bus = all.filter((p) => p.kind === "bus");
     expect(bus.length).toBeGreaterThan(0);
     const tt = bus[0].trust.categories.find((c) => c.name === "transit_timing")!;
     expect(tt.status).toBe("PROBABLE");
     expect(tt.detail).toContain("timetable");
+  });
+
+  it("never invents night service: routes with unknown hours are UNKNOWN, with no worst case", () => {
+    const e = testEngine();
+    const { all } = planFull(e.state, workHome(e, { modes: ["walk", "bus"], finish: "02:20", by: "03:30", along: "bus" }), e.cache);
+    const bus = all.filter((p) => p.kind === "bus");
+    expect(bus.length).toBeGreaterThan(0);
+    for (const p of bus) {
+      expect(p.trust.categories.find((c) => c.name === "transit_timing")!.status).toBe("UNKNOWN");
+      expect(p.eta.worst).toBeNull();
+      expect(p.feasible.worst).toBe(false);
+    }
+  });
+
+  it("finds a way with changes when no single route connects (IIIT Nagpur -> Dharampeth)", () => {
+    const e = testEngine();
+    e.state.pretendNightBuses = true;
+    const w = e.world, d = w.meta.ui_defaults;
+    const t = Date.now();
+    const { all } = planFull(e.state, { ...workHome(e, { modes: ["walk", "bus"], finish: "23:00", by: "02:30" }), origin: { ...d.start, kind: null } }, e.cache);
+    expect(Date.now() - t).toBeLessThan(1500);
+    const multi = all.filter((p) => p.segments.filter((s) => s.mode === "bus" || s.mode === "metro").length >= 2);
+    expect(multi.length).toBeGreaterThan(0);
+    const steps = multi[0].segments.filter((s) => s.mode === "wait");
+    expect(steps.slice(1).every((s) => s.change)).toBe(true);
+  });
+
+  it("re-plans from a point off the way (deviation 'New way')", () => {
+    const e = testEngine();
+    const req = workHome(e, { modes: ["walk"] });
+    const off = { lat: req.origin.lat + 300 / 110540, lon: req.origin.lon, name: "", kind: null };   // 300 m north
+    const { ps } = planFull(e.state, { ...req, origin: off }, e.cache);
+    const rec = ps.plans.find((p) => p.id === ps.recommendedId)!;
+    expect(rec).toBeTruthy();
+    const [la, lo] = rec.segments[0].coords[0];
+    expect(Math.hypot((la - off.lat) * 110540, (lo - off.lon) * 103900)).toBeLessThan(5);
+  });
+
+  it("offers diverse walking ways (Yen) and compares them like routing.py", () => {
+    const e = testEngine();
+    const t = Date.now();
+    const { ps, all } = planFull(e.state, workHome(e, { modes: ["walk"] }), e.cache);
+    expect(Date.now() - t).toBeLessThan(1500);
+    const walks = all.filter((p) => p.kind === "walk");
+    expect(walks.length).toBeGreaterThanOrEqual(3);
+    expect(ps.compare?.ways.length).toBeGreaterThanOrEqual(2);
+    expect(ps.compare!.ways.filter((w) => w.recommended)).toHaveLength(1);
+    for (const w of ps.compare!.ways) expect(ps.plans.some((p) => p.id === w.id)).toBe(true);    // every compared way can be shown
   });
 
   it("still plans with all live info lost, with lower confidence and nothing invented", () => {
@@ -56,18 +105,18 @@ describe("planner on the bundled city", () => {
     expect(validatePlanSet(after)).toEqual([]);
   });
 
-  it("re-plans when a closure breaks the cab way, and logs why", () => {
+  it("re-plans when a closure blocks the walking way, and logs why", () => {
     const e = testEngine();
-    const ap = e.plan(workHome(e, { modes: ["walk", "cab"] }));
+    const ap = e.plan(workHome(e, { modes: ["walk"] }));
     const rec = ap.planset!.plans.find((p) => p.id === ap.planset!.recommendedId)!;
+    e.choose(rec.id);
     e.inject({ type: "road_closure", params: { edge_selector: "main_road_nearest_route" } });
     e.advance(60);
-    const kinds = ap.log.map((x) => x.kind);
-    expect(kinds).toContain("event");
-    if (rec.kind === "cab") {
-      expect(ap.planset!.recommendedId).not.toBe(rec.id);
-      expect(ap.log.some((x) => x.kind === "switch" && x.code === "switch.closure")).toBe(true);
-    }
+    expect(ap.log.map((x) => x.kind)).toContain("event");
+    const blocked = ap.log.some((x) => x.kind === "switch" && x.code === "switch.closure");
+    const crosses = rec.segments.some((sg) => sg.mode === "walk" && sg.label.includes(" via "));
+    if (blocked) expect(ap.planset!.recommendedId).not.toBe(rec.id);
+    expect(blocked || !crosses).toBe(true);
   });
 
   it("hysteresis keeps the plan on small changes", () => {

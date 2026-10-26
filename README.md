@@ -39,7 +39,7 @@ cd server && npm install && npm start           # prints http://<laptop Wi-Fi IP
 ```
 In the app, open **Demo → 8. Dispatch server**, enter that address and press **Save + test**. Phone and laptop must share a Wi-Fi network; on Windows, allow Node.js through the firewall. The dashboard is at http://localhost:8787.
 
-**Tests**: `cd frontend && npm test` runs 55 tests in about 15 s: freshness rules, opening hours, the planner on the real Noida data, the plain-words view, all 8 stress scenarios, copy rules, and the help ladder and mesh.
+**Tests**: `cd frontend && npm test` runs 55 tests in about 15 s: freshness rules, opening hours, the planner on the real Nagpur data, the plain-words view, all 8 stress scenarios, copy rules, and the help ladder and mesh.
 
 ## How it works
 
@@ -71,13 +71,13 @@ legacy/        replaced code and earlier specs (see AUDIT.md)
 |---|---|
 | Streets, footpaths, street lamps / `lit` tags (OpenStreetMap) | Traffic speeds |
 | Hospitals, police, pharmacies, shops, opening hours (OpenStreetMap) | Live bus positions, cancellations |
-| Bus-stop locations (OpenStreetMap) | Night bus timetable (no open feed exists for Noida) |
+| Bus-stop locations (OpenStreetMap) | Bus timetable (until U4: estimated, no open feed found yet) |
 | Weather forecast snapshot + live current weather (Open-Meteo) | Road closures, accidents, waterlogging |
 | Phone GPS, SMS and phone calls (the user sends them) | Incident history (seeded, biased by real map features) |
 | | Cab waiting times |
 | | Police / hospital / contact desks (`server/`), mesh of nearby phones |
 
-**Help is a demo**: the dispatch server is not connected to any emergency service. *Call 112* is the real path and is always on screen. Area: Noida, 4 km around Sector 18.
+**Help is a demo**: the dispatch server is not connected to any emergency service. *Call 112* is the real path and is always on screen. Area: Nagpur and Butibori (Nagpur core, Butibori + IIIT Nagpur, and the Wardha Road corridor).
 
 ## Honest limits
 

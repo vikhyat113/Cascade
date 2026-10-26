@@ -9,3 +9,4 @@ httpx>=0.27
 tzdata>=2024.1      # IANA time zones on Windows
 # Tests
 pytest>=8.0
+pillow>=10  # scripts/fetch_viirs.py (night-lights images)

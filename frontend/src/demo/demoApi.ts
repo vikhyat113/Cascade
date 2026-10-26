@@ -11,7 +11,7 @@ export interface Source {
   id: string; label: string; live: boolean; synthetic: boolean; enabled: boolean; status: Status;
   confidence: number; age_s: number | null; reliability: number; ttl_s: number; history: Status[];
 }
-export interface SimState { now_text: string; speed: number; paused: boolean; sources: Record<string, boolean>; truth: { rain: string | null } }
+export interface SimState { now_text: string; speed: number; paused: boolean; sources: Record<string, boolean>; truth: { rain: string | null }; pretend: boolean }
 export type ScenarioResult = EngineResult;
 export interface LogLine { hhmm: string; severity: string; message: string; code?: string }
 
@@ -25,7 +25,7 @@ export const demo = {
   },
   sim: async (): Promise<SimState> => {
     const [c, sources] = await Promise.all([call("clock"), call("sources")]);
-    return { now_text: c.now_text ?? "", speed: c.speed, paused: c.paused, sources, truth: { rain: c.rain } };
+    return { now_text: c.now_text ?? "", speed: c.speed, paused: c.paused, sources, truth: { rain: c.rain }, pretend: c.pretend };
   },
   log: () => call("log") as Promise<LogLine[]>,
   outage: (source: SourceArg, enabled: boolean) => call("outage", source, enabled),
@@ -35,6 +35,7 @@ export const demo = {
     return call("setClock", { hhmm: o.time, speed: o.speed, paused: o.paused });
   },
   reset: () => call("reset"),
+  pretend: (on: boolean) => call("setPretend", on),
   scenarios: () => call("scenarios"),
   results: async () => ({ results: [...results.values()] }),
   /** All eight scenarios in their own worker; `onResult` fires as each one finishes. */

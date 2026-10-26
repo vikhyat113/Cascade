@@ -46,6 +46,12 @@ def load_copy(lang: str) -> dict:
         table = {}
     if lang != "en":
         table = {**load_copy("en"), **table}
+    legacy = COPY_DIR.parent.parent.parent / "backend" / "app" / "presentation" / "legacy_copy.json"
+    try:                                             # cab strings left the app's copy deck in UPGRADE U4
+        old = json.loads(legacy.read_text(encoding="utf-8"))
+        table = {**old.get("en", {}), **old.get(lang, {}), **table}
+    except (OSError, ValueError):
+        pass
     return table
 
 
@@ -91,7 +97,7 @@ def dist_text(m: float, t: T) -> str:
 
 
 def short_place(name: Optional[str]) -> str:
-    """'Police Station Sector-12 (Noida)' -> 'Police Station Sector-12'; keeps lines short."""
+    """'Sitabuldi Police Station (Nagpur)' -> 'Sitabuldi Police Station'; keeps lines short."""
     if not name:
         return ""
     n = re.split(r"\s*[(,]", name)[0].strip()

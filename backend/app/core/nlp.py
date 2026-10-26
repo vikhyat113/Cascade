@@ -1,4 +1,4 @@
-"""Natural-language request parsing: "I finish at 2:15 and need to reach Sector 12 by 3".
+"""Natural-language request parsing: "I finish at 2:15 and need to reach Dharampeth by 3".
 
 Rule-based parser always runs. If GROQ_API_KEY is set, an LLM is asked to
 extract the same fields as JSON; its output is schema-validated and only used

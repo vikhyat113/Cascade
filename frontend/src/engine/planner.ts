@@ -6,13 +6,14 @@ import { RANK, STATUS_OF, coverageStatus, shares, weakest, type FactView, type S
 import { CI, combine, edgeCostRisk, edgeRisk, pathComps, type Comps, type EdgeRisk } from "./risk";
 import { havensNear, poiView, type OpenCache, type PoiView } from "./services";
 import type { State } from "./state";
-import { cabWait, nextDeparture, stopsNear, tripTiming, tripsAfter, type TripTiming } from "./transit";
-import { shortestPath, type World } from "./world";
+import { compareWays, computeEdgeCost, diverseWays, type CandidateMetrics, type RGraph } from "./kshortest";
+import { itineraries, nextDeparture, tripTiming, tripsAfter, type TripTiming } from "./transit";
+import { shortestPath, type Route, type World } from "./world";
 
 const P = CONFIG.planner;
 const CASES = ["best", "expected", "worst"] as const;
 type Tri = [number, number, number];
-export type Mode = "walk" | "bus" | "metro" | "cab";
+export type Mode = "walk" | "bus" | "metro";
 
 export interface Point { lat: number; lon: number; name?: string; kind?: "home" | "work" | null }
 export interface PlanRequest { origin: Point; destination: Point; start?: number | null; deadline?: number | null; modes?: Mode[]; riskWeight?: number; maxWalkM?: number }
@@ -22,10 +23,10 @@ export interface RouteSpec { kind: Mode; legs: Leg[]; lam: number; sig: string }
 
 export interface Category { name: string; label: string; status: Status; confidence: number; detail: string; critical: boolean; w?: Record<Status, number> }
 export interface Segment {
-  mode: "walk" | "wait" | "bus" | "metro" | "cab"; label: string; from: string; to: string;
+  mode: "walk" | "wait" | "bus" | "metro"; label: string; from: string; to: string;
   start: Record<string, number | null>; end: Record<string, number | null>; durationS: Record<string, number | null>;
   distanceM: number; coords: [number, number][]; risk: Record<string, { lo: number; hi: number }>; safety: { lo: number; hi: number };
-  status: Status; facts: FactView[]; tripId?: string; routeId?: string; haven?: string | null; cab?: boolean;
+  status: Status; facts: FactView[]; tripId?: string; routeId?: string; haven?: string | null; change?: boolean;
 }
 export interface Plan {
   id: string; kind: Mode; lam: number; labels: string[]; modes: string[]; title: string;
@@ -41,14 +42,21 @@ export interface PlanSet {
   plans: Plan[]; recommendedId: string | null; planB: PlanB | null; feasibilityLevel: string; noFeasible: boolean;
   warnings: string[]; notes: string[]; weather: FactView; closures: { id: string; name: string; reason: string; kind: string; lat: number; lon: number; status: Status }[];
   havensNearOrigin: PoiView[]; pinnedInvalid: string | null; userLocked?: boolean; changeLog?: LogEntry[]; history?: { t: number; confidence: number; safetyLo: number }[];
+  compare?: ReturnType<typeof compareWays>;        // "Other ways" ranking (U3)
+}
+
+/** The world's street graph as the multi-route engine sees it. */
+export function worldGraph(w: World): RGraph {
+  return { m: w.m, elen: w.elen, nx: w.nx, ny: w.ny, emx: w.emx, emy: w.emy,
+    adj: (u: number) => { const out: [number, number, boolean][] = []; for (let k = w.adjStart[u]; k < w.adjStart[u + 1]; k++) { const e = w.adjEdge[k]; out.push([w.adjNode[k], e, w.eu[e] !== u]); } return out; } };
 }
 export interface LogEntry { t: number; hhmm: string; kind: string; severity: "info" | "warn" | "alert"; message: string; code: string; detail?: string; critical?: boolean }
 
 export const CATEGORY_LABEL: Record<string, string> = {
   lighting: "Street lighting", incidents: "Incident data", isolation: "Open places nearby", emergency: "Emergency access",
-  weather: "Weather", traffic: "Traffic speeds", closures: "Road closures", transit_timing: "Bus timing", cab_availability: "Cab availability",
+  weather: "Weather", traffic: "Traffic speeds", closures: "Road closures", transit_timing: "Bus / metro timing",
 };
-const CRITICAL: Record<Mode, string[]> = { walk: ["closures", "weather"], bus: ["transit_timing", "closures"], metro: ["transit_timing", "closures"], cab: ["cab_availability", "traffic", "closures"] };
+const CRITICAL: Record<Mode, string[]> = { walk: ["closures", "weather"], bus: ["transit_timing", "closures"], metro: ["transit_timing", "closures"] };
 const STATUS_CONF = [0, 0.2, 0.45, 0.75];
 
 function sig(kind: Mode, legs: Leg[]): string {
@@ -90,11 +98,30 @@ function overlap(a: RouteSpec, b: RouteSpec, w: World): number {
   return shared / Math.max(ta, tb);
 }
 
+/** Walking candidates only change with the risk picture (15-min slice) or blocked streets, so the
+ *  re-planner (every tick) reuses them: λ searches + diverse ways are the costly part of planning. */
+const walkCache = new WeakMap<State, Map<string, RouteSpec[]>>();
+
 function walkCandidates(c: Ctx): RouteSpec[] {
   const w = c.w, m = w.m;
   const [o, od] = w.nearestNode(c.req.origin.lat, c.req.origin.lon);
   const [d, dd] = w.nearestNode(c.req.destination.lat, c.req.destination.lon);
   const er = c.riskAt(c.t0);
+  let blockedSig = 0;
+  for (let e = 0; e < m; e++) if (er.walkBlocked[e]) blockedSig = (blockedSig * 31 + e) % 1000000007;
+  const key = `${o}|${d}|${Math.floor(c.t0 / 900000)}|${blockedSig}|${c.req.origin.lat},${c.req.origin.lon}|${c.req.destination.lat},${c.req.destination.lon}`;
+  let byState = walkCache.get(c.s);
+  if (!byState) { byState = new Map(); walkCache.set(c.s, byState); }
+  const hit = byState.get(key);
+  if (hit) return hit;
+  const out = walkSearch(c, o, od, d, dd, er);
+  if (byState.size > 20) byState.clear();
+  byState.set(key, out);
+  return out;
+}
+
+function walkSearch(c: Ctx, o: number, od: number, d: number, dd: number, er: EdgeRisk): RouteSpec[] {
+  const w = c.w, m = w.m;
   const risk = edgeCostRisk(er, m);
   const out: RouteSpec[] = [];
   const cost = new Float64Array(m);
@@ -106,6 +133,16 @@ function walkCandidates(c: Ctx): RouteSpec[] {
     if (lam === 1) ref = path;
     out.push(mk("walk", [{ mode: "walk", edges: path, a: ptOf(c.req.origin), b: ptOf(c.req.destination), connectorM: od + dd }], lam));
   }
+  // diverse alternatives: Yen's K-shortest loopless paths on the safety-aware cost (U3), walkable trips only
+  const straight = Math.hypot(w.nx[o] - w.nx[d], w.ny[o] - w.ny[d]);
+  if (straight <= P.yen.maxStraightM) {
+    const W = COMPONENTS.map((k) => CONFIG.risk.weights[k]);
+    const ycost = computeEdgeCost(w, (c, e) => er.lo[c * m + e], (c, e) => er.hi[c * m + e], W, er.walkBlocked,
+      { walkFactor: er.weather.walk[1], speed: P.walkSpeed.expected, lam: 1, u: 0.5 });
+    const y = diverseWays(worldGraph(w), o, d, ycost, er.walkBlocked, { maxK: P.yen.maxK, timeBudgetMs: P.yen.budgetMs, corridorM: P.yen.corridorM, diverseN: P.yen.k });
+    for (const p of y.kept.slice(1))
+      out.push(mk("walk", [{ mode: "walk", edges: p.edges, a: ptOf(c.req.origin), b: ptOf(c.req.destination), connectorM: od + dd }], 1));
+  }
   if (ref) {                                                     // one diversified alternative
     const pen = new Set(ref.map(([e]) => e));
     for (let e = 0; e < m; e++) cost[e] = (w.elen[e] / P.walkSpeed.expected + P.riskCostSPerM * w.elen[e] * risk[e]) * (pen.has(e) ? 1.6 : 1);
@@ -115,63 +152,44 @@ function walkCandidates(c: Ctx): RouteSpec[] {
   return out;
 }
 
-function cabCandidates(c: Ctx): RouteSpec[] {
+/** Bus / metro ways with up to CONFIG.transit.maxTransfers changes (itinerary search in transit.ts),
+ *  turned into legs: walk -> ride -> (walk to change) -> ride ... -> walk. */
+function transitCandidates(c: Ctx, modes: Set<string>): RouteSpec[] {
   const w = c.w, m = w.m;
-  const [o, od] = w.nearestNode(c.req.origin.lat, c.req.origin.lon, true);
-  const [d, dd] = w.nearestNode(c.req.destination.lat, c.req.destination.lon, true);
-  if (o < 0 || d < 0) return [];
-  const er = c.riskAt(c.t0);
-  const risk = edgeCostRisk(er, m);
-  const out: RouteSpec[] = [];
-  const cost = new Float64Array(m);
-  for (const lam of [0, 1]) {
-    for (let e = 0; e < m; e++) cost[e] = er.car.exp[e] + lam * 0.3 * w.elen[e] * risk[e];
-    const path = shortestPath(w, o, d, cost, { blocked: er.carBlocked, carOnly: true });
-    if (path) out.push(mk("cab", [{ mode: "cab", edges: path, a: ptOf(c.req.origin), b: ptOf(c.req.destination), connectorM: od + dd }], lam));
-  }
-  return out;
-}
-
-function transitCandidates(c: Ctx, mode: "bus" | "metro"): RouteSpec[] {
-  const w = c.w, m = w.m;
-  const ox = w.proj.x(c.req.origin.lon), oy = w.proj.y(c.req.origin.lat);
-  const dx = w.proj.x(c.req.destination.lon), dy = w.proj.y(c.req.destination.lat);
-  const r = P.maxAccessWalkM / 1.25;
-  const nearO = stopsNear(w, ox, oy, r, mode), nearD = stopsNear(w, dx, dy, r, mode);
-  const combos: [number, string, number, number][] = [];
-  for (const a of nearO) for (const b of nearD) {
-    if (a.routeId !== b.routeId || a.k === b.k) continue;
-    const route = w.routes.get(a.routeId)!;
-    const [lo, hi] = [Math.min(a.k, b.k), Math.max(a.k, b.k)];
-    const ride = route.segS.slice(lo, hi).reduce((x, y) => x + y, 0);
-    combos.push([((a.d + b.d) * 1.3) / P.walkSpeed.expected + ride, a.routeId, a.k, b.k]);
-  }
-  combos.sort((x, y) => x[0] - y[0]);
-  const seen = new Set<string>(), picked: typeof combos = [];
-  for (const cb of combos) {
-    if (seen.has(cb[1]) && picked.length >= 2) continue;
-    seen.add(cb[1]); picked.push(cb);
-    if (picked.length >= 4) break;
-  }
-  if (!picked.length) return [];
+  const from = { x: w.proj.x(c.req.origin.lon), y: w.proj.y(c.req.origin.lat) };
+  const to = { x: w.proj.x(c.req.destination.lon), y: w.proj.y(c.req.destination.lat) };
+  const its = itineraries(w, from, to, { modes, accessM: P.maxAccessWalkM, walkMps: P.walkSpeed.expected });
+  if (!its.length) return [];
   const er = c.riskAt(c.t0);
   const risk = edgeCostRisk(er, m);
   const cost = new Float64Array(m);
   for (let e = 0; e < m; e++) cost[e] = w.elen[e] / P.walkSpeed.expected + P.riskCostSPerM * w.elen[e] * risk[e];
-  const [o, od] = w.nearestNode(c.req.origin.lat, c.req.origin.lon);
-  const [d, dd] = w.nearestNode(c.req.destination.lat, c.req.destination.lon);
+  const walk = (fromN: number, fromC: number, a: Leg["a"], toN: number, toC: number, b: Leg["b"]): Leg | null => {
+    const path = fromN === toN ? [] : shortestPath(w, fromN, toN, cost, { blocked: er.walkBlocked });
+    return path ? { mode: "walk", edges: path, a, b, connectorM: fromC + toC } : null;
+  };
   const out: RouteSpec[] = [];
-  for (const [, rid, kb, ka] of picked) {
-    const route = w.routes.get(rid)!;
-    const sb = route.stops[kb], sa = route.stops[ka];
-    const [nb, nbd] = w.nearestNode(sb.lat, sb.lon), [na, nad] = w.nearestNode(sa.lat, sa.lon);
-    const p1 = shortestPath(w, o, nb, cost, { blocked: er.walkBlocked }), p2 = shortestPath(w, na, d, cost, { blocked: er.walkBlocked });
-    if (!p1 || !p2) continue;
-    out.push(mk(mode, [
-      { mode: "walk", edges: p1, a: ptOf(c.req.origin), b: [sb.lat, sb.lon, sb.name], connectorM: od + nbd },
-      { mode, edges: [], a: [sb.lat, sb.lon, sb.name], b: [sa.lat, sa.lon, sa.name], connectorM: 0, routeId: rid, dir: ka > kb ? "A" : "B", board: kb, alight: ka },
-      { mode: "walk", edges: p2, a: [sa.lat, sa.lon, sa.name], b: ptOf(c.req.destination), connectorM: nad + dd },
-    ], 1));
+  for (const it of its) {
+    const legs: Leg[] = [];
+    let [node, conn] = w.nearestNode(c.req.origin.lat, c.req.origin.lon);
+    let pt = ptOf(c.req.origin), ok = true;
+    for (const ride of it.rides) {
+      const route = w.routes.get(ride.routeId)!;
+      const sb = route.stops[ride.board], sa = route.stops[ride.alight];
+      const [nb, nbd] = w.nearestNode(sb.lat, sb.lon);
+      const wl = walk(node, conn, pt, nb, nbd, [sb.lat, sb.lon, sb.name]);
+      if (!wl) { ok = false; break; }
+      legs.push(wl, { mode: route.mode as Mode, edges: [], a: [sb.lat, sb.lon, sb.name], b: [sa.lat, sa.lon, sa.name], connectorM: 0,
+        routeId: route.id, dir: ride.dir, board: ride.board, alight: ride.alight });
+      [node, conn] = w.nearestNode(sa.lat, sa.lon);
+      pt = [sa.lat, sa.lon, sa.name];
+    }
+    const [d, dd] = w.nearestNode(c.req.destination.lat, c.req.destination.lon);
+    const last = ok ? walk(node, conn, pt, d, dd, ptOf(c.req.destination)) : null;
+    if (!last) continue;
+    legs.push(last);
+    const kind: Mode = it.rides.some((r) => w.routes.get(r.routeId)!.mode === "bus") ? "bus" : "metro";
+    out.push(mk(kind, legs, it.transfers));
   }
   return out;
 }
@@ -183,6 +201,7 @@ class Eval {
   parts: [number, "outdoor" | "vehicle" | "haven", Comps][] = [];
   cats = new Map<string, Category>();
   walkM = 0; distM = 0; invalid: string | null = null; warn: string[] = [];
+  usesUnknownHours = false;        // depends on a route whose hours are not known
   timing: TripTiming | null = null; havens: PoiView[] = []; along = new Map<string, PoiView>();
   constructor(public c: Ctx, public spec: RouteSpec) {}
 
@@ -217,7 +236,11 @@ class Eval {
     const { c } = this, w = c.w;
     const er = c.riskAt(c.at(this.cur[1]));
     const idx = leg.edges.map(([e]) => e);
-    if (idx.some((e) => er.walkBlocked[e])) { this.invalid = `way crosses a flooded street (${[...new Set(idx.filter((e) => er.walkBlocked[e]).map((e) => w.ename[e] || "a street"))].join(", ")})`; return; }
+    if (idx.some((e) => er.walkBlocked[e])) {
+      const blocked = idx.filter((e) => er.walkBlocked[e]);
+      const why = er.closures.some((cl) => cl.kind === "closure" && cl.edges.some((e) => blocked.includes(e))) ? "closure" : "flooded street";
+      this.invalid = `way crosses a ${why} (${[...new Set(blocked.map((e) => w.ename[e] || "a street"))].join(", ")})`; return;
+    }
     const dist = idx.reduce((a, e) => a + w.elen[e], 0) + leg.connectorM;
     const wf = er.weather.walk;
     const dur: Tri = [dist / (P.walkSpeed.best * wf[0]), dist / (P.walkSpeed.expected * wf[1]), dist / (P.walkSpeed.worst * wf[2])];
@@ -233,9 +256,13 @@ class Eval {
       const lw = comps.lighting.w;
       const sh = shares(lw);
       const conf = idx.reduce((a, e, i) => a + w.lightConf[e] * L[i], 0) / tot;
-      facts.push(mkView("lighting:segment", `${Math.round(sh.KNOWN * 100)}% mapped, ${Math.round(sh.PROBABLE * 100)}% main-road prior`, coverageStatus(lw), conf, "osm_map", false,
+      const bySrc = [0, 0, 0, 0];
+      idx.forEach((e, i) => { bySrc[w.lightSrc[e]] += L[i]; });
+      const pc = (k: number) => Math.round((bySrc[k] / tot) * 100);
+      const src = `${pc(0)}% mapped, ${pc(1)}% main roads, ${pc(2)}% satellite`;
+      facts.push(mkView("lighting:segment", src, coverageStatus(lw), conf, "osm_map", false,
         `${Math.round(sh.UNKNOWN * 100)}% of this stretch has no lighting data`, [Math.round(comps.lighting.lo * 100) / 100, Math.round(comps.lighting.hi * 100) / 100]));
-      this.coverage("lighting", { ...lw }, conf, `${Math.round(sh.KNOWN * 100)}% mapped, ${Math.round(sh.PROBABLE * 100)}% main-road prior, ${Math.round(sh.UNKNOWN * 100)}% no data`);
+      this.coverage("lighting", { ...lw }, conf, `${src}, ${Math.round(sh.UNKNOWN * 100)}% no data`);
       const iconf = (Object.entries(comps.isolation.w) as [Status, number][]).reduce((a, [k, v]) => a + STATUS_CONF[RANK[k]] * v, 0) / tot;
       this.coverage("isolation", { ...comps.isolation.w }, iconf, "open-state of places along the way");
       const hs = c.s.sourceView("incident_history");
@@ -269,60 +296,80 @@ class Eval {
     }
   }
 
-  cab(leg: Leg) {
+  /** Waiting at a stop: inside a safe place near it when the wait is long. Returns the risk parts. */
+  waitPlace(stop: Route["stops"][number], waitS: number) {
+    const { c } = this;
+    const haven = waitS > 240 ? havensNear(c.s, c.cache, c.at(this.cur[1]), stop.x, stop.y, P.safeHavenRadiusM, 1) : [];
+    let wcomps = this.pointComps(c.riskAt(c.at(this.cur[1])), stop.lat, stop.lon);
+    if (haven.length) {
+      const hw = CONFIG.risk.safeHavenWaitRisk;
+      wcomps = Object.fromEntries(Object.entries(wcomps).map(([k, v]) => [k, { lo: Math.min(v.lo, hw), hi: Math.min(v.hi, hw * 2), w: v.w }]));
+      this.havens.push(...haven);
+    }
+    return { haven, wcomps };
+  }
+
+  rideParts(route: Route, leg: Leg) {
+    const { c } = this;
+    const stop = route.stops[leg.board!];
+    const rf = CONFIG.risk.transitRideFactor;
+    const pc = this.pointComps(c.riskAt(c.at(this.cur[1])), stop.lat, stop.lon);
+    const comps: Comps = Object.fromEntries(Object.entries(pc).map(([k, v]) => [k, { lo: v.lo * (k === "weather" ? 0 : rf), hi: v.hi * (k === "weather" ? 0 : rf), w: v.w }]));
+    const [lo, hi] = [Math.min(leg.board!, leg.alight!), Math.max(leg.board!, leg.alight!)];
+    const rideS = route.segS.slice(lo, hi).reduce((a, b) => a + b, 0);
+    const rideM = rideS * (route.mode === "bus" ? P.busSpeedMps : 11);
+    const stops = route.stops.slice(lo, hi + 1);
+    const coords = (leg.alight! > leg.board! ? stops : [...stops].reverse()).map((x) => [x.lat, x.lon] as [number, number]);
+    return { comps, rideS, rideM, coords };
+  }
+
+  /** A route whose service hours are not known: never invented. The wait has no worst case (it may not run
+   *  at all), the timing is UNKNOWN, and the plan says so in plain words with a Backup. */
+  unknownService(leg: Leg, route: Route) {
     const { c } = this, w = c.w;
-    const er = c.riskAt(c.at(this.cur[1]));
-    const idx = leg.edges.map(([e]) => e);
-    if (idx.some((e) => er.carBlocked[e])) {
-      const names = [...new Set(er.closures.filter((cl) => cl.edges.some((e) => idx.includes(e))).map((cl) => cl.name))];
-      this.invalid = `cab way crosses a closure${names.length ? ` (${names.join(", ")})` : ""}`; return;
-    }
-    const cw = cabWait(c.s, leg.a[0], leg.a[1], c.at(this.cur[1]));
-    const wait: Tri = [cw.lo, cw.exp, cw.hi];
+    const hw = (route.headwayMin ?? CONFIG.transit.unknownHeadwayMin) * 60;
+    const stop = route.stops[leg.board!];
+    const view = mkView(`transit:hours:${route.id}`, null, "UNKNOWN", 0, "transit_schedule", route.synthetic, `${route.name}: service hours not known${route.synthetic ? "; bus times are estimated" : ""}`);
+    const change = this.segments.some((x) => x.mode === "bus" || x.mode === "metro");
     const start = [...this.cur] as Tri;
-    this.cur = this.cur.map((v, i) => v + wait[i]) as Tri;
-    const wcomps = this.pointComps(c.riskAt(c.at(start[1])), leg.a[0], leg.a[1]);
-    this.parts.push([wait[1], "outdoor", wcomps]);
-    const ws = this.seg("wait", `Wait for a cab / auto: ${Math.round(cw.lo / 60)}-${Math.round(cw.hi / 60)} min`, leg, start, this.cur, 0, [[leg.a[0], leg.a[1]]], wcomps, [cw.view]);
-    ws.cab = true;
-    this.segments.push(ws);
-    this.cat("cab_availability", cw.view.status, cw.view.confidence, `wait ${Math.round(cw.lo / 60)}-${Math.round(cw.hi / 60)} min (night-time model)`);
-    const walkS = leg.connectorM / P.walkSpeed.expected;
-    const ride: Tri = [idx.reduce((a, e) => a + er.car.lo[e], 0) + walkS * 0.8, idx.reduce((a, e) => a + er.car.exp[e], 0) + walkS, idx.reduce((a, e) => a + er.car.hi[e], 0) + walkS * 1.3];
-    const vf = CONFIG.risk.vehicleFactor;
-    const comps = pathComps(er, idx, w.elen, { lighting: vf, isolation: vf, incident: vf, weather: 0.3 });
-    // inside a vehicle the traffic component is congestion, not pedestrian exposure
-    const tot = idx.reduce((a, e) => a + w.elen[e], 0) || 1;
-    const tw: Record<Status, number> = { UNKNOWN: 0, OUTDATED: 0, PROBABLE: 0, KNOWN: 0 };
-    let tlo = 0, thi = 0, tconf = 0;
-    for (const e of idx) {
-      tw[STATUS_OF[er.car.code[e]]] += w.elen[e]; tconf += er.car.conf[e] * w.elen[e];
-      tlo += (Math.min(0.8, Math.max(0, (er.car.lo[e] / er.car.free[e] - 1) * 0.5)) + 0.05) * w.elen[e];
-      thi += (Math.min(0.8, Math.max(0, (er.car.hi[e] / er.car.free[e] - 1) * 0.5)) + 0.1) * w.elen[e];
-    }
-    comps.traffic = { lo: tlo / tot, hi: thi / tot, w: tw };
+    const waitEnd: Tri = [start[0] + 60, start[1] + hw / 2, Infinity];
+    const { haven, wcomps } = this.waitPlace(stop, hw / 2);
+    this.parts.push([hw / 2, haven.length ? "haven" : "outdoor", wcomps]);
+    const where = haven.length ? `at ${haven[0].name} (${haven[0].distM} m from the stop)` : `at ${stop.name}`;
+    const wseg = this.seg("wait", `Wait ${where} for ${route.id}: hours not known (about every ${Math.round(hw / 60)} min)`, leg, start, waitEnd, 0, [[stop.lat, stop.lon]], wcomps, [view]);
+    Object.assign(wseg, { routeId: route.id, haven: haven[0]?.name ?? null, change });
+    this.segments.push(wseg);
+    this.cur = waitEnd;
+    const { comps, rideS, rideM, coords } = this.rideParts(route, leg);
     const s0 = [...this.cur] as Tri;
-    this.cur = this.cur.map((v, i) => v + ride[i]) as Tri;
-    this.distM += tot; this.walkM += leg.connectorM;
-    this.parts.push([ride[1], "vehicle", comps]);
-    const sh = shares(tw);
-    this.coverage("traffic", tw, tconf / tot, `${Math.round(sh.KNOWN * 100)}% live, ${Math.round((sh.PROBABLE + sh.OUTDATED) * 100)}% old, ${Math.round(sh.UNKNOWN * 100)}% unknown`);
-    const tv = mkView("traffic:way", `${Math.round((tot / Math.max(ride[1], 1)) * 3.6)} km/h average`, coverageStatus(tw), tconf / tot, "traffic", true, "ride minutes from per-road traffic facts",
-      [Math.round(ride[0] / 6) / 10, Math.round(ride[2] / 6) / 10]);
-    const cs = this.seg("cab", `Cab ${fmtM(tot)}`, leg, s0, this.cur, tot, w.pathCoords(leg.edges), comps, [tv, er.weather.view]);
-    this.segments.push(cs);
-    this.cat("weather", er.weather.view.status, er.weather.view.confidence, er.weather.summary);
+    this.cur = [s0[0] + rideS * 0.9, s0[1] + rideS, Infinity];
+    this.distM += rideM;
+    this.parts.push([rideS, "vehicle", comps]);
+    const rseg = this.seg(route.mode as Segment["mode"], `${route.id} ${route.stops[leg.board!].name} -> ${route.stops[leg.alight!].name}`, leg, s0, this.cur, rideM, coords, comps, [view]);
+    Object.assign(rseg, { routeId: route.id });
+    this.segments.push(rseg);
+    this.usesUnknownHours = true;
+    this.cat("transit_timing", "UNKNOWN", 0, `${route.id}: service hours not known${route.synthetic ? " (estimated route)" : ""}`);
+    this.warn.push(`${route.id}: not sure it runs now (service hours not known)`);
+    void w;
   }
 
   transit(leg: Leg) {
     const { c } = this, w = c.w, s = c.s;
     const route = w.routes.get(leg.routeId!)!;
+    const pretend = s.pretendNightBuses;
+    if (!route.hoursKnown && !pretend) { this.unknownService(leg, route); return; }
     const arr = this.cur.map((o) => (isFinite(o) ? c.at(o) : null));
-    const trips = tripsAfter(w, route, leg.dir!, leg.board!, arr[0] ?? c.t0, 8);
+    const trips = tripsAfter(w, route, leg.dir!, leg.board!, arr[0] ?? c.t0, 8, pretend);
     const timings = trips.map((tr) => tripTiming(s, tr, leg.board!, leg.alight!)).filter((x): x is TripTiming => !!x);
     if (!timings.length) {
-      const nxt = nextDeparture(w, route.id, arr[1] ?? c.t0);
+      const nxt = nextDeparture(w, route.id, arr[1] ?? c.t0, pretend);
       this.invalid = s.available("transit_schedule") ? `${route.name}: no service${nxt ? ` until ${w.city.hhmm(nxt)}` : " tonight"}` : `${route.id} timing UNKNOWN: no timetable and live info too old`;
+      return;
+    }
+    const firstOk = timings.find((tt) => !tt.cancelled);
+    if (firstOk && arr[1] !== null && firstOk.board[1] - arr[1] > CONFIG.transit.maxWaitMin * 60000) {
+      this.invalid = `${route.name}: no service until ${w.city.hhmm(firstOk.board[1])}`;
       return;
     }
     const buf = P.stopBufferS * 1000;
@@ -348,34 +395,22 @@ class Eval {
     alightOff[2] = Math.max(alightOff[2], alightOff[1]);
     const waitExp = isFinite(boardOff[1]) ? Math.max(0, boardOff[1] - this.cur[1]) : 0;
     const stop = route.stops[leg.board!];
-    const haven = waitExp > 240 ? havensNear(s, c.cache, c.at(this.cur[1]), stop.x, stop.y, P.safeHavenRadiusM, 1) : [];
-    let wcomps = this.pointComps(c.riskAt(c.at(this.cur[1])), stop.lat, stop.lon);
-    if (haven.length) {
-      const hw = CONFIG.risk.safeHavenWaitRisk;
-      wcomps = Object.fromEntries(Object.entries(wcomps).map(([k, v]) => [k, { lo: Math.min(v.lo, hw), hi: Math.min(v.hi, hw * 2), w: v.w }]));
-      this.havens.push(...haven);
-    }
+    const change = this.segments.some((x) => x.mode === "bus" || x.mode === "metro");
+    const { haven, wcomps } = this.waitPlace(stop, waitExp);
     const start = [...this.cur] as Tri;
     const waitEnd = this.cur.map((a, i) => (isFinite(boardOff[i]) ? Math.max(a, boardOff[i]) : Infinity)) as Tri;
     this.parts.push([waitExp, haven.length ? "haven" : "outdoor", wcomps]);
     const tv: FactView = { ...ref.view, note: ref.note };
     const where = haven.length ? `at ${haven[0].name} (${haven[0].distM} m from the stop)` : `at ${stop.name}`;
     const wseg = this.seg("wait", `Wait ${where} for the ${w.city.hhmm(ref.board[1])} ${route.id} (~${Math.round(waitExp / 60)} min)`, leg, start, waitEnd, 0, [[stop.lat, stop.lon]], wcomps, haven.length ? [tv, haven[0].open] : [tv]);
-    Object.assign(wseg, { tripId: ref.trip.id, routeId: route.id, haven: haven[0]?.name ?? null });
+    Object.assign(wseg, { tripId: ref.trip.id, routeId: route.id, haven: haven[0]?.name ?? null, change });
     this.segments.push(wseg);
     this.cur = waitEnd;
-    const er = c.riskAt(c.at(this.cur[1]));
-    const rf = CONFIG.risk.transitRideFactor;
-    const pc = this.pointComps(er, stop.lat, stop.lon);
-    const rideComps: Comps = Object.fromEntries(Object.entries(pc).map(([k, v]) => [k, { lo: v.lo * (k === "weather" ? 0 : rf), hi: v.hi * (k === "weather" ? 0 : rf), w: v.w }]));
+    const { comps: rideComps, rideM, coords } = this.rideParts(route, leg);
     const s0 = [...this.cur] as Tri;
     this.cur = alightOff;
-    const [lo, hi] = [Math.min(leg.board!, leg.alight!), Math.max(leg.board!, leg.alight!)];
-    const rideM = route.segS.slice(lo, hi).reduce((a, b) => a + b, 0) * (route.mode === "bus" ? P.busSpeedMps : 11);
     this.distM += rideM;
     this.parts.push([isFinite(alightOff[1]) ? alightOff[1] - s0[1] : 0, "vehicle", rideComps]);
-    const stops = route.stops.slice(lo, hi + 1);
-    const coords = (leg.alight! > leg.board! ? stops : [...stops].reverse()).map((x) => [x.lat, x.lon] as [number, number]);
     const rseg = this.seg(route.mode as Segment["mode"], `${route.id} ${route.stops[leg.board!].name} -> ${route.stops[leg.alight!].name}`, leg, s0, this.cur, rideM, coords, rideComps, [tv]);
     Object.assign(rseg, { tripId: ref.trip.id, routeId: route.id });
     this.segments.push(rseg);
@@ -384,7 +419,7 @@ class Eval {
     if (!chosen[2]) this.warn.push(`Worst case misses the last catchable ${route.id}`);
     const later = timings.filter((tt) => tt.trip.times[0] > ref.trip.times[0] && !tt.cancelled && tt.board[1] - ref.board[1] < 90 * 60000);
     if (!later.length) {
-      const nxt = nextDeparture(w, route.id, ref.trip.times[0] + 60000);
+      const nxt = nextDeparture(w, route.id, ref.trip.times[0] + 60000, pretend);
       this.warn.push(`This is the last ${route.id} for a while (${w.city.hhmm(ref.board[1])}, timing ${ref.status}); ${nxt ? `next service ${w.city.hhmm(nxt)}` : "no later service tonight"}`);
     }
   }
@@ -394,7 +429,6 @@ function evaluate(c: Ctx, spec: RouteSpec): Plan | { invalid: string; kind: Mode
   const ev = new Eval(c, spec);
   for (const leg of spec.legs) {
     if (leg.mode === "walk") ev.walk(leg);
-    else if (leg.mode === "cab") ev.cab(leg);
     else ev.transit(leg);
     if (ev.invalid) return { invalid: ev.invalid, kind: spec.kind };
   }
@@ -421,9 +455,13 @@ function evaluate(c: Ctx, spec: RouteSpec): Plan | { invalid: string; kind: Mode
   const limiting = critCats.length ? critCats.reduce((a, b) => (RANK[b.status] < RANK[a.status] || (b.status === a.status && b.confidence < a.confidence) ? b : a)).name : null;
   const feas: Record<string, boolean> = {};
   CASES.forEach((k, i) => { feas[k] = isFinite(ev.cur[i]) && (c.deadline === null || c.at(ev.cur[i]) <= c.deadline); });
+  // the expected case of a route with unknown hours assumes it runs: that would be invented service, so
+  // such a way only counts as on time in the best case (never preferred over a way that is expected to work)
+  if (ev.usesUnknownHours) feas.expected = false;
   const first = ev.segments[0]?.label ?? "";
+  const rides = spec.legs.filter((l) => l.routeId);
   const title = spec.kind === "walk" ? `Walk${first.includes(" via ") ? ` via ${first.split(" via ")[1]}` : ""}`
-    : spec.kind === "cab" ? `Cab / auto${spec.lam > 0 ? " (main roads)" : " (fastest roads)"}` : `${spec.legs[1].routeId} ${spec.kind} from ${spec.legs[1].a[2]}`;
+    : `${rides.map((l) => l.routeId).join(" + ")} from ${rides[0]?.a[2] ?? ""}${rides.length > 1 ? ` (${rides.length - 1} change${rides.length > 2 ? "s" : ""})` : ""}`;
   return {
     id: spec.sig, kind: spec.kind, lam: spec.lam, labels: [], modes: [...new Set(ev.segments.filter((x) => x.mode !== "wait").map((x) => x.mode))], title,
     eta: ev.times(ev.cur), durationMin: Object.fromEntries(CASES.map((k, i) => [k, isFinite(ev.cur[i]) ? Math.round(ev.cur[i] / 6) / 10 : null])), feasible: feas,
@@ -445,16 +483,19 @@ function utility(p: Plan, rw: number, lo: number, hi: number): number {
 export function choosePlanB(rec: Plan, plans: Plan[]): { plan: Plan; weakLink: string; weakStatus: Status; reason: string; trigger: string } | null {
   const weak = rec.trust.limiting;
   if (!weak) return null;
-  let cands = plans.filter((p) => p.id !== rec.id && !p.dependsOn.includes(weak));
-  if (weak === "closures" || !cands.length) cands = plans.filter((p) => p.id !== rec.id && p.kind !== rec.kind);
+  // a way that walks beyond the limit (e.g. 27 km at night) is never a Backup: waiting somewhere safe is
+  const overLimit = (p: Plan) => p.warnings.some((x) => x.startsWith("Walks ")) && !rec.warnings.some((x) => x.startsWith("Walks "));
+  const usable = plans.filter((p) => p.id !== rec.id && !overLimit(p));
+  let cands = usable.filter((p) => !p.dependsOn.includes(weak));
+  if (weak === "closures" || !cands.length) cands = usable.filter((p) => p.kind !== rec.kind);
   if (!cands.length) return null;
   const best = cands.reduce((a, b) => {
     const ka = [Number(a.feasible.worst), Number(a.feasible.expected), a.safety.lo], kb = [Number(b.feasible.worst), Number(b.feasible.expected), b.safety.lo];
     return kb[0] > ka[0] || (kb[0] === ka[0] && (kb[1] > ka[1] || (kb[1] === ka[1] && kb[2] > ka[2]))) ? b : a;
   });
   const wc = rec.trust.categories.find((x) => x.name === weak)!;
-  const trig: Record<string, string> = { transit_timing: "if the bus has not come 5 minutes after its time", cab_availability: "if no cab accepts within the longest wait",
-    traffic: "if the cab is stuck in slow traffic", closures: "if you meet a closure on the way", weather: "if it starts raining heavily" };
+  const trig: Record<string, string> = { transit_timing: "if the bus has not come 5 minutes after its time",
+    closures: "if you meet a closure on the way", weather: "if it starts raining heavily" };
   return { plan: best, weakLink: weak, weakStatus: wc.status, reason: `Data on ${wc.label.toLowerCase()} is ${wc.status === "PROBABLE" ? "only " : ""}${wc.status} (${wc.detail})`,
     trigger: `Switch to ${best.title} ${trig[weak] ?? "if things change"}.` };
 }
@@ -466,7 +507,6 @@ function explain(c: Ctx, p: Plan, planB: ReturnType<typeof choosePlanB>): string
   if (p.labels.includes("Fastest")) bits.push(`quickest expected arrival (${Math.round(p.durationMin.expected ?? 0)} min)`);
   if (p.kind === "walk" && cats.lighting) bits.push(`lighting: ${cats.lighting.detail}`);
   if ((p.kind === "bus" || p.kind === "metro") && cats.transit_timing) bits.push(cats.transit_timing.detail);
-  if (p.kind === "cab" && cats.cab_availability) bits.push(`cab ${cats.cab_availability.detail}`);
   if (p.openAlong.length) bits.push(`passes ${p.openAlong.length} open place(s) on foot`);
   if (!bits.length) bits.push(`worst-case safety ${p.safety.lo}`);
   let t = (p.labels.includes("Recommended") ? "Chosen because: " : "") + bits.join("; ") + ".";
@@ -505,14 +545,15 @@ export function planFull(s: State, req: PlanRequest, cache: OpenCache, pinned: R
   if (c.deadline !== null && c.deadline < departure - 3600000) c.deadline += 86400000;
   let phase: PlanSet["phase"] = now < departure ? "before_departure" : "in_progress";
   if (phase === "in_progress") c.notes.push(`Trip in progress since ${w.city.hhmm(departure)} (assumed you left on time)`);
-  const modes = new Set<Mode>([...(req.modes ?? ["walk", "bus", "cab"]), "walk"]);
+  const modes = new Set<Mode>([...(req.modes ?? ["walk", "bus", "metro"]), "walk"]);
+  if (modes.has("bus")) modes.add("metro");                 // "bus" in a request means public transport
   let specs: RouteSpec[] = walkCandidates(c);
-  if (modes.has("cab")) specs.push(...cabCandidates(c));
-  if (modes.has("bus")) specs.push(...transitCandidates(c, "bus"), ...transitCandidates(c, "metro"));
+  const transitModes = new Set([...modes].filter((x) => x !== "walk"));
+  if (transitModes.size) specs.push(...transitCandidates(c, transitModes));
   if (pinned) specs = [pinned, ...specs];
   const uniq: RouteSpec[] = [];
   for (const sp of specs) {
-    if (uniq.some((u) => u.sig === sp.sig || (u.kind === sp.kind && (sp.kind === "walk" || sp.kind === "cab") && overlap(sp, u, w) > P.dedupeOverlap))) continue;
+    if (uniq.some((u) => u.sig === sp.sig || (u.kind === sp.kind && sp.kind === "walk" && overlap(sp, u, w) > P.dedupeOverlap))) continue;
     uniq.push(sp);
   }
   const plans: Plan[] = [], specById = new Map<string, RouteSpec>();
@@ -561,6 +602,14 @@ export function planFull(s: State, req: PlanRequest, cache: OpenCache, pinned: R
     if (out.length >= 4) break;
     if (!out.includes(p) && !kinds.has(p.kind)) { p.labels.push("Alternative"); if (!p.feasible.worst && c.deadline !== null) p.warnings.unshift("May miss your deadline in the worst case"); out.push(p); kinds.add(p.kind); }
   }
+  // "Other ways" (U3): compare up to 6 distinct ways the way routing.py did; keep the compared ones in the set
+  const cand = [...out, ...plans.filter((p) => !out.includes(p)).sort((a, b) => b.safety.lo - a.safety.lo)].slice(0, 6);
+  const metrics = (p: Plan): CandidateMetrics => ({ id: p.id, durationMin: { best: p.durationMin.best, expected: p.durationMin.expected, worst: p.durationMin.worst },
+    safety: p.safety, outdoorMin: p.outdoorMin, lightingDetail: p.trust.categories.find((x) => x.name === "lighting")?.detail ?? null,
+    havenDistM: p.safeHavens.length ? Math.min(...p.safeHavens.map((h) => h.distM ?? 500)) : null, feasibleWorst: !!p.feasible.worst,
+    worstEta: p.eta.worst, limitingStatus: p.trust.status });
+  const compare = cand.length >= 2 ? compareWays(cand.map(metrics), c.deadline) : undefined;
+  if (compare) for (const wy of compare.ways) { const p = cand.find((x) => x.id === wy.id)!; if (!out.includes(p)) { p.labels.push("Other way"); out.push(p); } }
   for (const p of plans) { p.explanation = explain(c, p, p === rec ? pb : null); p.leaveAdvice = leaveAdvice(c, p); }
   if (rec?.eta.worst && rec.eta.worst + 600000 < now) phase = "arrived";
   const er0 = c.riskAt(departure);
@@ -570,7 +619,7 @@ export function planFull(s: State, req: PlanRequest, cache: OpenCache, pinned: R
     planB: pb ? { planId: pb.plan.id, weakLink: pb.weakLink, weakStatus: pb.weakStatus, reason: pb.reason, trigger: pb.trigger } : null,
     feasibilityLevel: noFeasible ? "none" : level, noFeasible, warnings, notes: c.notes, weather: er0.weather.view,
     closures: er0.closures.map(({ id, name, reason, kind, lat, lon, status }) => ({ id, name, reason, kind, lat, lon, status })),
-    havensNearOrigin: havensNear(s, cache, departure, ox, oy, 400, 3), pinnedInvalid,
+    havensNearOrigin: havensNear(s, cache, departure, ox, oy, 400, 3), pinnedInvalid, compare,
   };
   return { ps, specs: specById, all: plans };
 }

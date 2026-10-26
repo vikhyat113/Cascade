@@ -2,8 +2,10 @@ import { CONFIG } from "../config";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { SimpleView } from "../types";
 import { ago, anyLive, demo, OFFICIAL, type LogLine, type SimState, type Source, type Status } from "./demoApi";
-import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl } from "../sos";
+import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl, useHelp } from "../sos";
 import { BleSection } from "./BleSection";
+import { FakeGpsSection } from "./FakeGpsSection";
+import { HereSection } from "./HereSection";
 import { LocationCheck } from "./LocationCheck";
 import { fireTimerSoon } from "../sos/safetyTimer";
 import { MeshGraph } from "./MeshGraph";
@@ -19,6 +21,7 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
   const [open, setOpen] = useState<Record<string, boolean>>({ break: true, happen: true, time: true });
   const [log, setLog] = useState<LogLine[]>([]);
   const [url, setUrl] = useState(getDispatchUrl());
+  const helpRun = useHelp();
   const [, bump] = useState(0);
   const flip = (f: () => void) => { f(); bump((n) => n + 1); };
 
@@ -88,6 +91,12 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
             <Act label="Accident" disabled={!planId} onClick={() => act(() => demo.inject("accident", { edge_selector: "main_road_nearest_route" }), "Accident on the way")} />
           </div>
           {!planId && <p className="mt-2 text-[0.9rem] text-soft">Find a way first: these act on the current trip.</p>}
+          <button onClick={() => act(() => demo.pretend(!sim?.pretend), sim?.pretend ? "Night buses: real hours only" : "Pretend night buses run (SIMULATED): routes with unknown hours get assumed trips")}
+            disabled={!sim} aria-pressed={!!sim?.pretend}
+            className={`mt-2 flex min-h-12 w-full items-center justify-between rounded-2xl border px-4 font-semibold disabled:opacity-40 ${sim?.pretend ? "border-warn/60 bg-warn/10" : "border-edge bg-raised"}`}>
+            <span>Pretend night buses run (simulated)</span><span className={sim?.pretend ? "text-warn" : "text-soft"}>{sim?.pretend ? "ON" : "off"}</span>
+          </button>
+          <p className="mt-1 text-[0.85rem] text-soft">No Nagpur bus route has real night hours (docs/TRANSIT_DATA.md): E1-E4 are estimated, the Metro runs 06:00-22:00. Off: buses are “Not sure”.</p>
         </Section>
 
         <Section id="time" title="3. Time">
@@ -129,7 +138,7 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
               <li key={s.id} className="flex items-center justify-between gap-2 rounded-xl bg-raised px-3 py-2">
                 <span className="min-w-0">
                   <span className="font-semibold">{s.label}</span>
-                  <span className="ml-2 text-[0.85rem] text-soft">{s.synthetic ? "simulated" : "real (cached)"} · age {ago(s.age_s)}{!s.enabled ? " · switched off" : ""}</span>
+                  <span className="ml-2 text-[0.85rem] text-soft">{s.synthetic ? "simulated" : s.live ? "real" : "real (cached)"} · age {ago(s.age_s)}{!s.enabled ? " · switched off" : ""}</span>
                 </span>
                 <span className="shrink-0 rounded-full border px-2 py-0.5 text-[0.85rem] font-bold"
                   style={{ borderColor: OFFICIAL[s.status].color, color: OFFICIAL[s.status].color }}>
@@ -181,6 +190,17 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
               if (!(await dispatch.reachable())) throw new Error(`can't reach ${getDispatchUrl()}`);
             }, `Dispatch server reachable at ${url}`)} />
           </div>
+          <button onClick={() => flip(() => { demoFlags.shortSteps = !demoFlags.shortSteps; })} aria-pressed={demoFlags.shortSteps}
+            className={`mt-2 min-h-12 w-full rounded-2xl border px-3 font-semibold ${demoFlags.shortSteps ? "border-accent bg-accent/15" : "border-edge bg-raised"}`}>
+            Short help steps: {demoFlags.shortSteps ? `ON (${CONFIG.dispatch.demoAckTimeoutS} s per desk)` : `off (${CONFIG.dispatch.ackTimeoutS} s per desk)`}
+          </button>
+          <p className="mt-1 text-[0.85rem] text-soft">Ladder: police, hospital, fire station (a doctor request asks the hospital first), then the nearest open place with people (no alert possible there).</p>
+          {helpRun && (
+            <ol className="mt-2 max-h-40 space-y-0.5 overflow-y-auto rounded-xl bg-raised p-2 font-mono text-[0.8rem]">
+              <li className="text-soft">help #{helpRun.id}: {helpRun.type}, step {helpRun.step + 1}/{helpRun.steps} ({helpRun.target}), status {helpRun.status}, via {helpRun.via ?? "-"}</li>
+              {helpRun.log.map((l, i) => <li key={i}>{l}</li>)}
+            </ol>
+          )}
           <div className="mt-2">
             <Act label="Safety timer: ask now" onClick={() => act(async () => {
               if (!(await fireTimerSoon())) throw new Error("no timer: switch on “Tell my contact if I’m late”, then Start");
@@ -190,6 +210,14 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
 
         <Section id="ble" title="9. Real Bluetooth (MESH_REAL)">
           <BleSection />
+        </Section>
+
+        <Section id="gps" title="10. Location (simulated)">
+          <FakeGpsSection view={view} />
+        </Section>
+
+        <Section id="here" title="11. HERE online extras (tiles, traffic, transit check)">
+          <HereSection view={view} />
         </Section>
       </div>
     </div>
