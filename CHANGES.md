@@ -34,3 +34,6 @@ Each request: what it was, which layer it touched, what was done.
 ## 8. UPGRADE U2: map layers (tag up-2)
 - **Layer**: data scripts (`fetch_viirs.py`, `fetch_weather_grid.py`), engine (`world.ts` satellite prior, `heatmap.ts`, `astronomy.ts`), worker layer data, `lib/layers.ts`, `screens/Layers.tsx`, map drawing, copy (EN + HI), config.
 
+## 9. UPGRADE U3: other ways (tag up-3)
+- **Layer**: engine (`kshortest.ts`, planner candidates + comparison, cache), simple view (`other_ways`, `close_text`), screens (`OtherWays.tsx`, Result link), map colours, copy (EN + HI), golden generator `tools/golden_routing.py`.
+

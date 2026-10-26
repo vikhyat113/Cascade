@@ -6,6 +6,7 @@ import { RANK, STATUS_OF, coverageStatus, shares, weakest, type FactView, type S
 import { CI, combine, edgeCostRisk, edgeRisk, pathComps, type Comps, type EdgeRisk } from "./risk";
 import { havensNear, poiView, type OpenCache, type PoiView } from "./services";
 import type { State } from "./state";
+import { compareWays, computeEdgeCost, diverseWays, type CandidateMetrics, type RGraph } from "./kshortest";
 import { itineraries, nextDeparture, tripTiming, tripsAfter, type TripTiming } from "./transit";
 import { shortestPath, type Route, type World } from "./world";
 
@@ -41,6 +42,13 @@ export interface PlanSet {
   plans: Plan[]; recommendedId: string | null; planB: PlanB | null; feasibilityLevel: string; noFeasible: boolean;
   warnings: string[]; notes: string[]; weather: FactView; closures: { id: string; name: string; reason: string; kind: string; lat: number; lon: number; status: Status }[];
   havensNearOrigin: PoiView[]; pinnedInvalid: string | null; userLocked?: boolean; changeLog?: LogEntry[]; history?: { t: number; confidence: number; safetyLo: number }[];
+  compare?: ReturnType<typeof compareWays>;        // "Other ways" ranking (U3)
+}
+
+/** The world's street graph as the multi-route engine sees it. */
+export function worldGraph(w: World): RGraph {
+  return { m: w.m, elen: w.elen, nx: w.nx, ny: w.ny, emx: w.emx, emy: w.emy,
+    adj: (u: number) => { const out: [number, number, boolean][] = []; for (let k = w.adjStart[u]; k < w.adjStart[u + 1]; k++) { const e = w.adjEdge[k]; out.push([w.adjNode[k], e, w.eu[e] !== u]); } return out; } };
 }
 export interface LogEntry { t: number; hhmm: string; kind: string; severity: "info" | "warn" | "alert"; message: string; code: string; detail?: string; critical?: boolean }
 
@@ -90,11 +98,30 @@ function overlap(a: RouteSpec, b: RouteSpec, w: World): number {
   return shared / Math.max(ta, tb);
 }
 
+/** Walking candidates only change with the risk picture (15-min slice) or blocked streets, so the
+ *  re-planner (every tick) reuses them: λ searches + diverse ways are the costly part of planning. */
+const walkCache = new WeakMap<State, Map<string, RouteSpec[]>>();
+
 function walkCandidates(c: Ctx): RouteSpec[] {
   const w = c.w, m = w.m;
   const [o, od] = w.nearestNode(c.req.origin.lat, c.req.origin.lon);
   const [d, dd] = w.nearestNode(c.req.destination.lat, c.req.destination.lon);
   const er = c.riskAt(c.t0);
+  let blockedSig = 0;
+  for (let e = 0; e < m; e++) if (er.walkBlocked[e]) blockedSig = (blockedSig * 31 + e) % 1000000007;
+  const key = `${o}|${d}|${Math.floor(c.t0 / 900000)}|${blockedSig}|${c.req.origin.lat},${c.req.origin.lon}|${c.req.destination.lat},${c.req.destination.lon}`;
+  let byState = walkCache.get(c.s);
+  if (!byState) { byState = new Map(); walkCache.set(c.s, byState); }
+  const hit = byState.get(key);
+  if (hit) return hit;
+  const out = walkSearch(c, o, od, d, dd, er);
+  if (byState.size > 20) byState.clear();
+  byState.set(key, out);
+  return out;
+}
+
+function walkSearch(c: Ctx, o: number, od: number, d: number, dd: number, er: EdgeRisk): RouteSpec[] {
+  const w = c.w, m = w.m;
   const risk = edgeCostRisk(er, m);
   const out: RouteSpec[] = [];
   const cost = new Float64Array(m);
@@ -105,6 +132,16 @@ function walkCandidates(c: Ctx): RouteSpec[] {
     if (!path) continue;
     if (lam === 1) ref = path;
     out.push(mk("walk", [{ mode: "walk", edges: path, a: ptOf(c.req.origin), b: ptOf(c.req.destination), connectorM: od + dd }], lam));
+  }
+  // diverse alternatives: Yen's K-shortest loopless paths on the safety-aware cost (U3), walkable trips only
+  const straight = Math.hypot(w.nx[o] - w.nx[d], w.ny[o] - w.ny[d]);
+  if (straight <= P.yen.maxStraightM) {
+    const W = COMPONENTS.map((k) => CONFIG.risk.weights[k]);
+    const ycost = computeEdgeCost(w, (c, e) => er.lo[c * m + e], (c, e) => er.hi[c * m + e], W, er.walkBlocked,
+      { walkFactor: er.weather.walk[1], speed: P.walkSpeed.expected, lam: 1, u: 0.5 });
+    const y = diverseWays(worldGraph(w), o, d, ycost, er.walkBlocked, { maxK: P.yen.maxK, timeBudgetMs: P.yen.budgetMs, corridorM: P.yen.corridorM, diverseN: P.yen.k });
+    for (const p of y.kept.slice(1))
+      out.push(mk("walk", [{ mode: "walk", edges: p.edges, a: ptOf(c.req.origin), b: ptOf(c.req.destination), connectorM: od + dd }], 1));
   }
   if (ref) {                                                     // one diversified alternative
     const pen = new Set(ref.map(([e]) => e));
@@ -560,6 +597,14 @@ export function planFull(s: State, req: PlanRequest, cache: OpenCache, pinned: R
     if (out.length >= 4) break;
     if (!out.includes(p) && !kinds.has(p.kind)) { p.labels.push("Alternative"); if (!p.feasible.worst && c.deadline !== null) p.warnings.unshift("May miss your deadline in the worst case"); out.push(p); kinds.add(p.kind); }
   }
+  // "Other ways" (U3): compare up to 6 distinct ways the way routing.py did; keep the compared ones in the set
+  const cand = [...out, ...plans.filter((p) => !out.includes(p)).sort((a, b) => b.safety.lo - a.safety.lo)].slice(0, 6);
+  const metrics = (p: Plan): CandidateMetrics => ({ id: p.id, durationMin: { best: p.durationMin.best, expected: p.durationMin.expected, worst: p.durationMin.worst },
+    safety: p.safety, outdoorMin: p.outdoorMin, lightingDetail: p.trust.categories.find((x) => x.name === "lighting")?.detail ?? null,
+    havenDistM: p.safeHavens.length ? Math.min(...p.safeHavens.map((h) => h.distM ?? 500)) : null, feasibleWorst: !!p.feasible.worst,
+    worstEta: p.eta.worst, limitingStatus: p.trust.status });
+  const compare = cand.length >= 2 ? compareWays(cand.map(metrics), c.deadline) : undefined;
+  if (compare) for (const wy of compare.ways) { const p = cand.find((x) => x.id === wy.id)!; if (!out.includes(p)) { p.labels.push("Other way"); out.push(p); } }
   for (const p of plans) { p.explanation = explain(c, p, p === rec ? pb : null); p.leaveAdvice = leaveAdvice(c, p); }
   if (rec?.eta.worst && rec.eta.worst + 600000 < now) phase = "arrived";
   const er0 = c.riskAt(departure);
@@ -569,7 +614,7 @@ export function planFull(s: State, req: PlanRequest, cache: OpenCache, pinned: R
     planB: pb ? { planId: pb.plan.id, weakLink: pb.weakLink, weakStatus: pb.weakStatus, reason: pb.reason, trigger: pb.trigger } : null,
     feasibilityLevel: noFeasible ? "none" : level, noFeasible, warnings, notes: c.notes, weather: er0.weather.view,
     closures: er0.closures.map(({ id, name, reason, kind, lat, lon, status }) => ({ id, name, reason, kind, lat, lon, status })),
-    havensNearOrigin: havensNear(s, cache, departure, ox, oy, 400, 3), pinnedInvalid,
+    havensNearOrigin: havensNear(s, cache, departure, ox, oy, 400, 3), pinnedInvalid, compare,
   };
   return { ps, specs: specById, all: plans };
 }

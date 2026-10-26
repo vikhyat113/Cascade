@@ -112,3 +112,11 @@ Decisions made without asking (per the working rules), with the reason for each.
 * **Moon light**: computed on the phone (SunCalc formulas, BSD-2) as bright / some / none from illumination and altitude; "computed, not measured". The changes branch's fixed 35° altitude fallback was not ported.
 * **Thermal (land surface temperature) was cut** (UPGRADE §11 cut order): it needs MODIS HDF processing via Planetary Computer that could not be done reliably in the time; nothing is shown for it.
 
+## UPGRADE U3: other ways (Yen's K-shortest)
+
+* `frontend/src/engine/kshortest.ts` ports `routing.py` from the `changes` branch: safety-aware edge cost, Dijkstra, Yen's K-shortest loopless paths (corridor limit, time budget, diversity filter: overlap <= 0.7, cost <= 1.6 × best, 4 kept), and the comparison (feasibility filter, Pareto dominance, weighted score, tie detection, explanations). **Golden tests**: `tools/golden_routing.py` runs the verbatim Python (`legacy/reference/routing_from_changes.py`) on a seeded 7×7 sample graph; the TS port returns the same costs, the same paths in the same order, the same scores, dominance, explanations and tie note (11 tests).
+* **Bug found in the Python** (documented, not copied): it read the "no lighting data" share by taking the last word of "40% no data", so it was always 0. The port reads the number; the golden fixture uses "no data 40%", which both read the same way.
+* **Diversity on a dense grid**: Yen's next paths in Nagpur's street grid are near-copies (12 paths within 1% cost, 82-99% overlap), so its diversity filter keeps only one. `diverseWays` keeps Yen's result and fills the remaining slots with the penalty method (used streets cost 1.4× more each round) under the same filter. Walkable trips only (≤ 3.5 km straight line), 600 m corridor, 400 ms budget.
+* **Caching**: walking candidates are reused per start, end, 15-min risk slice and blocked streets (the re-planner runs every tick).
+* **Screens**: the Result screen keeps its tabs; a small "Other ways" link opens up to 4 ways (arrive time, Safe/OK/Be careful, minutes outside, one-line why) and draws them in different colours; "Close choice. Safest picked." on a tie. The Python's technical texts (scores, "probable data") stay in the plan details for the Demo drawer; the screens use plain reason lines.
+

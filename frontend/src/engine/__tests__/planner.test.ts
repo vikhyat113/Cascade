@@ -79,6 +79,18 @@ describe("planner on the bundled city", () => {
     expect(Math.hypot((la - off.lat) * 110540, (lo - off.lon) * 103900)).toBeLessThan(5);
   });
 
+  it("offers diverse walking ways (Yen) and compares them like routing.py", () => {
+    const e = testEngine();
+    const t = Date.now();
+    const { ps, all } = planFull(e.state, workHome(e, { modes: ["walk"] }), e.cache);
+    expect(Date.now() - t).toBeLessThan(1500);
+    const walks = all.filter((p) => p.kind === "walk");
+    expect(walks.length).toBeGreaterThanOrEqual(3);
+    expect(ps.compare?.ways.length).toBeGreaterThanOrEqual(2);
+    expect(ps.compare!.ways.filter((w) => w.recommended)).toHaveLength(1);
+    for (const w of ps.compare!.ways) expect(ps.plans.some((p) => p.id === w.id)).toBe(true);    // every compared way can be shown
+  });
+
   it("still plans with all live info lost, with lower confidence and nothing invented", () => {
     const e = testEngine();
     const req = workHome(e, { finish: "02:10", by: "04:00" });

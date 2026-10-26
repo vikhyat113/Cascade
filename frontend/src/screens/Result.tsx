@@ -54,9 +54,9 @@ export function WarningLine({ option, onBackup }: { option: Option; onBackup: (i
   );
 }
 
-export function Result({ options, shown, onTab, onBackup, onStart, onBack, showPlaces, setShowPlaces, starting, lateAlert, setLateAlert, showDemo, onDemo, onHeight }: {
+export function Result({ options, shown, onTab, onBackup, onStart, onBack, showPlaces, setShowPlaces, starting, lateAlert, setLateAlert, onOtherWays, showDemo, onDemo, onHeight }: {
   options: Option[]; shown: Option; onTab: (id: string) => void; onBackup: (id: string) => void; onStart: () => void;
-  lateAlert: boolean; setLateAlert: (v: boolean) => void;
+  lateAlert: boolean; setLateAlert: (v: boolean) => void; onOtherWays: (() => void) | null;
   onBack: () => void; showPlaces: boolean; setShowPlaces: (v: boolean) => void; starting: boolean;
   showDemo: boolean; onDemo: () => void; onHeight: (h: number) => void;
 }) {
@@ -105,6 +105,12 @@ export function Result({ options, shown, onTab, onBackup, onStart, onBack, showP
       )}
 
       <div className="mt-4"><BigButton onClick={onStart} disabled={starting}>{t("label.start")}</BigButton></div>
+
+      {onOtherWays && (
+        <button onClick={onOtherWays} className="mt-3 flex min-h-11 items-center gap-1 font-semibold text-accent underline-offset-4 hover:underline">
+          {t("label.otherWays")} <Chevron dir="right" />
+        </button>
+      )}
 
       {shown.places.length > 0 && (
         <div className="mt-3">

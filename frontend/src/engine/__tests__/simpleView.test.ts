@@ -123,6 +123,20 @@ describe("simple view on the live engine", () => {
     expect(bus[0].warning?.text).toBe("Not sure buses run now.");
     expect(bus[0].warning?.backup_option_id !== null || bus[0].warning?.safe_wait === true).toBe(true);
   });
+  it("'Other ways' are plain: arrive time, safety, minutes outside, one-line why", () => {
+    const e = testEngine();
+    e.plan(workHome(e, { modes: ["walk"] }));
+    const v = e.view("en")!;
+    expect(v.other_ways.length).toBeGreaterThanOrEqual(2);
+    expect(v.other_ways.filter((w) => w.best)).toHaveLength(1);
+    for (const w of v.other_ways) {
+      expect(v.options.some((o) => o.id === w.option_id)).toBe(true);
+      expect(w.outside_text).toMatch(/^\d+ min outside$/);
+    }
+    expect(plainViolations(v)).toEqual([]);
+    const hi = e.view("hi")!;
+    expect(hi.other_ways[0].outside_text).toMatch(/मिनट बाहर/);
+  });
   it("open now never calls an unknown-hours place open", () => {
     const e = testEngine();
     const d = e.world.meta.ui_defaults.work;

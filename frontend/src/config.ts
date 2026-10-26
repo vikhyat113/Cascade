@@ -67,6 +67,8 @@ export const CONFIG = {
     stopBufferS: 60,
     safeHavenRadiusM: 200,
     busSpeedMps: 7,
+    // Yen's K-shortest diverse walking ways (U3): only for walkable trips, small corridor, time budget
+    yen: { k: 4, maxK: 8, budgetMs: 400, corridorM: 600, maxStraightM: 3500 },
   },
   transit: {
     maxTransfers: 2,          // changes between vehicles (A -> C -> B is one)

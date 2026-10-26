@@ -26,6 +26,7 @@ type Props = {
   end?: LatLon | null;
   me?: LatLon | null;
   changes?: LatLon[];       // stops where the way changes bus / metro
+  others?: { path: LatLon[]; color: string }[];   // "Other ways" sheet: each way in its own colour
   places?: PlaceOnWay[];
   fitKey?: string;
   bottomPad: number;
@@ -71,7 +72,7 @@ function lines(pts: Float32Array, off: Uint32Array): LatLon[][] {
 
 /** Dark street map: OpenStreetMap tiles in a night palette when online. The road network bundled in
  *  the app (major roads brighter) is drawn until tiles load and whenever they can't (offline). */
-export function MapCanvas({ center, bbox, layers, path, start, end, me, changes, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
+export function MapCanvas({ center, bbox, layers, path, start, end, me, changes, others, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
@@ -169,7 +170,11 @@ export function MapCanvas({ center, bbox, layers, path, start, end, me, changes,
     const g = layer.current;
     if (!m || !g) return;
     g.clearLayers();
-    if (path && path.length > 1) {
+    for (const o of [...(others ?? [])].reverse()) if (o.path.length > 1) {
+      L.polyline(o.path, { color: C.night, weight: 9, opacity: 0.8, interactive: false }).addTo(g);
+      L.polyline(o.path, { color: o.color, weight: 5, opacity: 0.95, interactive: false }).addTo(g);
+    }
+    if (path && path.length > 1 && !others?.length) {
       L.polyline(path, { color: C.night, weight: 11, opacity: 0.85, interactive: false }).addTo(g);
       L.polyline(path, { color: ACCENT, weight: 6, opacity: 1, interactive: false }).addTo(g);
     }
@@ -178,12 +183,12 @@ export function MapCanvas({ center, bbox, layers, path, start, end, me, changes,
     if (end) L.marker(end, { icon: pinIcon(), keyboard: false }).addTo(g);
     (places || []).forEach((p) => L.marker([p.lat, p.lon], { icon: placeIcon(p), title: p.name, alt: p.name }).addTo(g));
     if (me) L.marker(me, { icon: L.divIcon({ className: "", html: '<div class="nw-me"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(g);
-  }, [path, start, end, me, places, changes]);
+  }, [path, start, end, me, places, changes, others]);
 
   useEffect(() => {
     const m = map.current;
     if (!m) return;
-    const pts: LatLon[] = [...(path || []), ...(places || []).map((p) => [p.lat, p.lon] as LatLon)];
+    const pts: LatLon[] = [...(path || []), ...(others ?? []).flatMap((o) => o.path), ...(places || []).map((p) => [p.lat, p.lon] as LatLon)];
     if (start) pts.push(start);
     if (end) pts.push(end);
     if (pts.length === 0) return;

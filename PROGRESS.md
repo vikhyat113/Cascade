@@ -86,6 +86,12 @@
 - Night lights from NASA satellite (public GIBS, median of 8 nights) + lighting prior for unmarked streets (PROBABLE only; lowers UNKNOWN share). Weather grid (Open-Meteo, 13 points). Thermal cut (documented).
 - Checks: 79 app tests (satellite prior: lowers UNKNOWN, never KNOWN, never overrides tags; moon new/full and up/down; heat cells and hours); browser run: all five layers on, lazy files fetched only on switch-on, no errors; SOS e2e passes.
 
+### U3: other ways (done, tag up-3)
+- Port of routing.py (Yen + comparison) with golden tests against the verbatim Python; one Python parsing bug found and documented.
+- Diverse walking ways (Yen + penalty top-up), cached per risk slice; "Other ways" sheet with colours on the map, best pick, plain reasons, close-choice note.
+- Fixed while testing: sheet size watcher read a removed sheet (page error); bus ways said "Could make you late" when the truth is unknown hours.
+- Checks: 92 app tests (11 golden); browser: Other ways sheet with 4 ways, pick one, no errors; SOS e2e passes.
+
 ## Commands
 - Tests: `cd frontend && npm test` · SOS on every screen: `npm run build && npm run e2e` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 

@@ -7,7 +7,7 @@ export function Sheet({ children, onHeight }: { children: ReactNode; onHeight?: 
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current || !onHeight) return;
-    const ro = new ResizeObserver(() => onHeight(ref.current!.offsetHeight));
+    const ro = new ResizeObserver(() => { if (ref.current) onHeight(ref.current.offsetHeight); });   // the sheet may be gone already
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, [onHeight]);

@@ -5,6 +5,7 @@ import type { TripAsk } from "./engine/worker";
 import { MapCanvas, type MapLayers } from "./components/MapCanvas";
 import { LAYER_DEFAULT, loadLayerState, loadViirs, loadWeatherGrid, saveLayerState, viirsImage, type LayerId, type LayerState } from "./lib/layers";
 import { LayersButton, LayersSheet } from "./screens/Layers";
+import { OtherWays, WAY_COLORS } from "./screens/OtherWays";
 import { THEME } from "./theme";
 import { SosButton } from "./components/SosButton";
 import { BackButton, Banner, DeviationBanner, Pill } from "./components/ui";
@@ -76,6 +77,7 @@ function Main() {
   // ---- map layers (UPGRADE §3) ----
   const [layerState, setLayerState] = useState<LayerState>(LAYER_DEFAULT);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [waysOpen, setWaysOpen] = useState(false);
   const [layerData, setLayerData] = useState<MapLayers>({});
   const [layerMissing, setLayerMissing] = useState<Partial<Record<LayerId, boolean>>>({});
   const [layerMeta, setLayerMeta] = useState<{ night: string | null; weather: string | null }>({ night: null, weather: null });
@@ -357,6 +359,10 @@ function Main() {
 
   // ---- map for each screen ---------------------------------------------------------------------
   const mapView = useMemo(() => {
+    if (screen === "result" && shown && waysOpen && view?.other_ways.length) {
+      const others = view.other_ways.map((w, i) => ({ path: options.find((o) => o.id === w.option_id)?.path ?? [], color: THEME.color[WAY_COLORS[i % WAY_COLORS.length]] }));
+      return { others, start: shown.start, end: shown.end, fitKey: `w-${view.id}` };
+    }
     if ((screen === "result") && shown) {
       return { path: shown.path, start: shown.start, end: shown.end, changes: shown.changes, places: showPlaces ? shown.places : [],
                fitKey: `r-${view?.id}-${shown.id}-${showPlaces}` };
@@ -369,7 +375,7 @@ function Main() {
       return { places: need?.places ?? [], start: ll(from), fitKey: `n-${need?.type}-${need?.places?.length}` };
     }
     return { start: ll(from), end: ll(to), fitKey: `h-${from?.lat}-${to?.lat}` };
-  }, [screen, shown, current, showPlaces, view?.id, view?.trip?.position, need, from, to]);
+  }, [screen, shown, current, showPlaces, waysOpen, view?.id, view?.other_ways, view?.trip?.position, fix, need, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!cfg) {
     return (
@@ -419,6 +425,7 @@ function Main() {
       )}
       {screen === "result" && shown && (
         <Result options={options} shown={shown} onTab={setShownId} onBackup={onBackup} onStart={start} starting={starting} lateAlert={lateAlert} setLateAlert={setLateAlert}
+          onOtherWays={view?.other_ways.length ? () => setWaysOpen(true) : null}
           onBack={() => setScreen("home")} showPlaces={showPlaces} setShowPlaces={setShowPlaces} onHeight={setSheetH} {...demo} />
       )}
       {screen === "trip" && current && (
@@ -429,6 +436,10 @@ function Main() {
         <OpenNow title={need.title} places={need.places} empty={need.empty} onBack={() => setScreen("home")}
           onPick={goTo} onHeight={setSheetH} />
       )}
+      {waysOpen && screen === "result" && view?.other_ways.length ? (
+        <OtherWays ways={view.other_ways} closeText={view.close_text} colors={WAY_COLORS.map((c) => THEME.color[c])}
+          onPick={(id) => { setShownId(id); setWaysOpen(false); }} onClose={() => setWaysOpen(false)} />
+      ) : null}
       {help && <HelpSheet at={help.at} fresh={help.fresh} onClose={() => setHelp(null)} onGo={goTo} />}
       {safety && !help && from && <SafetySheet at={here() ?? from} late={safety === "late"} onHome={imHome} onHelp={safetyHelp} />}
       {askOk && !safety && !help && from && <SafetySheet ok at={here() ?? from} late={false}

@@ -24,11 +24,14 @@ export interface Option {
   warning: { text: string; pill: string | null; backup_option_id: string | null; safe_wait?: boolean } | null; backup_option_id?: string | null;
   places: PlaceOnWay[]; path: LatLon[]; start: LatLon | null; end: LatLon | null; changes: LatLon[];
 }
+/** One row of the "Other ways" sheet (U3): plain words only. */
+export interface OtherWay { option_id: string; arrive_text: string; safety_level: Option["safety_level"]; safety_text: string; outside_text: string; why_text: string; best: boolean }
 export interface TripState { option_id: string; step_index: number; progress: number; arrived: boolean; next_text: string; next_icon: string; minutes_left: number; position: LatLon | null }
 export interface SimpleView {
   id: string; lang: Lang; phase: string; now_text: string; connection: "live" | "offline";
   options: Option[]; current_option_id: string | null; banner: { id: string; text: string; see_option_id: string | null } | null;
   trip: TripState | null; deadline_text: string | null; error_text: string | null; details: PlanSet;
+  other_ways: OtherWay[]; close_text: string | null;
 }
 
 const TABS = ["safest", "balanced", "fastest"] as const;
@@ -106,6 +109,27 @@ export class SimpleViewBuilder {
       o.backup_option_id = planToOpt.get(bid)!;
     }
     options.push(...extra);
+    // "Other ways": every compared way needs an option to show it
+    const cmp = this.ps.compare;
+    const WHY: Record<string, CopyKey> = { recommended: "line.whyPick", late: "line.whyLate", dominated: "line.whyDominated", faster_less_safe: "line.whyFaster",
+      less_safe: "line.whyLessSafe", more_unlit: "line.whyUnlit", balance: "line.whyBalance" };
+    const otherWays: OtherWay[] = [];
+    for (const wy of (cmp?.ways ?? []).filter((x) => this.byId.has(x.id)).sort((a, b) => Number(b.recommended) - Number(a.recommended) || b.score - a.score).slice(0, 4)) {
+      let oid = planToOpt.get(wy.id);
+      if (!oid) {
+        const [o] = this.option(this.byId.get(wy.id)!);
+        oid = `way-${wy.id}`;
+        Object.assign(o, { id: oid, label: t("label.otherWays"), tab: false, same_as: null });
+        planToOpt.set(wy.id, oid);
+        options.push(o);
+      }
+      const o = options.find((x) => x.id === oid)!, p = this.byId.get(wy.id)!;
+      otherWays.push({ option_id: oid, arrive_text: o.arrive_text, safety_level: o.safety_level, safety_text: o.safety_text,
+        outside_text: t("fmt.outsideMin", { n: Math.max(1, Math.round(p.outdoorMin)) }),
+        // "late" because a bus has no known hours is said as what it is
+        why_text: t(wy.whyCode === "late" && p.trust.categories.some((c) => c.name === "transit_timing" && c.detail.includes("hours not known")) ? "line.busHoursNotSure" : WHY[wy.whyCode] ?? "line.whyBalance"),
+        best: wy.recommended });
+    }
     const curPlan = this.ps.recommendedId;
     let current = curPlan ? planToOpt.get(curPlan) ?? null : null;
     if (curPlan && !current && this.byId.has(curPlan)) {
@@ -120,6 +144,7 @@ export class SimpleViewBuilder {
       options, current_option_id: current, banner: this.banner(current),
       trip: curOpt && curPlan ? this.trip(curOpt, this.byId.get(curPlan)!) : null,
       deadline_text: this.city.clock(this.ps.deadline), error_text: options.length ? null : t("line.noWay"), details: this.ps,
+      other_ways: otherWays.length >= 2 ? otherWays : [], close_text: cmp?.tie && otherWays.length >= 2 ? t("line.closeChoice") : null,
     };
   }
 
@@ -353,6 +378,8 @@ export function userTexts(v: SimpleView): string[] {
   if (v.banner) out.push(v.banner.text);
   if (v.trip) out.push(v.trip.next_text);
   if (v.error_text) out.push(v.error_text);
+  for (const w of v.other_ways ?? []) out.push(w.arrive_text, w.safety_text, w.outside_text, w.why_text);
+  if (v.close_text) out.push(v.close_text);
   return out.filter(Boolean);
 }
 
