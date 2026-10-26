@@ -367,6 +367,11 @@ class Eval {
       this.invalid = s.available("transit_schedule") ? `${route.name}: no service${nxt ? ` until ${w.city.hhmm(nxt)}` : " tonight"}` : `${route.id} timing UNKNOWN: no timetable and live info too old`;
       return;
     }
+    const firstOk = timings.find((tt) => !tt.cancelled);
+    if (firstOk && arr[1] !== null && firstOk.board[1] - arr[1] > CONFIG.transit.maxWaitMin * 60000) {
+      this.invalid = `${route.name}: no service until ${w.city.hhmm(firstOk.board[1])}`;
+      return;
+    }
     const buf = P.stopBufferS * 1000;
     const pick = (k: number) => {
       const a = arr[k];

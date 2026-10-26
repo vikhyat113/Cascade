@@ -29,12 +29,12 @@ export interface ScenarioResult {
 }
 
 export const SCENARIOS: Scenario[] = Object.values(import.meta.glob<Scenario>("../scenarios/*.json", { eager: true, import: "default" }))
-  .sort((a, b) => a.name.localeCompare(b.name));
+  .sort((a, b) => parseInt(a.name) - parseInt(b.name) || a.name.localeCompare(b.name));
 
 /** The night all scenarios replay on: the night of the saved weather snapshot (so the forecast exists). */
 export function scenarioNight(w: World): number { return w.weatherFetchedAt ?? Date.parse(w.meta.generated_at); }
 
-/** "home" / "work" (demo defaults), "bus:start" / "bus:end" (ends of the first bus route, so bus
+/** "home" / "work" / "start" (demo defaults; start = IIIT Nagpur), "bus:start" / "bus:end" (ends of the first bus route, so bus
  *  scenarios test the timetable logic on whatever routes the area has), or a place name. */
 export function point(w: World, ref: string) {
   const d = w.meta.ui_defaults;
@@ -48,6 +48,7 @@ export function point(w: World, ref: string) {
   }
   if (ref === "home") return { ...d.home, kind: "home" as const };
   if (ref === "work") return { ...d.work, kind: "work" as const };
+  if (ref === "start" && d.start) return { lat: d.start.lat, lon: d.start.lon, name: d.start.name };
   const hit = w.geocode(ref, 1)[0];
   if (!hit) throw new Error(`cannot find ${ref}`);
   return { lat: hit.lat, lon: hit.lon, name: hit.name };
@@ -79,6 +80,8 @@ export function runScenario(w: World, sc: Scenario): ScenarioResult {
   const cats: Record<string, Status>[] = [];
   const etas: (number | null)[] = [];
   let usedCancelled = false;               // a cancelled trip still in the recommended way once live info reports it
+  let transfer: string | null = null;      // first recommended way with a change between two vehicles
+  let promised: string | null = null;      // a bus with unknown hours recommended as if it surely runs
   const sample = () => {
     const ps = ap.planset!;
     const view = eng.view("en")!;
@@ -88,6 +91,11 @@ export function runScenario(w: World, sc: Scenario): ScenarioResult {
     conflict ||= ps.plans.some((p) => p.warnings.some((x) => x.includes("Conflicting sources")));
     hasPlanAll &&= !!rec;
     etas.push(rec?.eta.expected ?? null);
+    const rides = rec?.segments.filter((x) => x.mode === "bus" || x.mode === "metro") ?? [];
+    if (!transfer && rides.length >= 2 && view.options.some((o) => o.plan_id === rec!.id && o.changes.length > 0))
+      transfer = rides.map((x) => x.routeId ?? x.label).join(" -> ");
+    const unsure = rides.find((x) => x.routeId && !w.routes.get(x.routeId)?.hoursKnown);
+    if (!promised && unsure && !s.pretendNightBuses && rec?.feasible.expected) promised = `${w.city.hhmm(clock.now())} ${unsure.routeId}`;
     usedCancelled ||= !!rec?.segments.some((x) => x.tripId && s.truth.cancelledTrips.has(x.tripId) && s.statusOf(s.get(`transit:rt:${x.tripId}`)) !== "UNKNOWN");
     samples.push({ t: w.city.hhmm(clock.now()), status: rec?.trust.status ?? "UNKNOWN", confidence: rec?.trust.confidence ?? 0, safety_lo: rec?.safety.lo ?? null });
     cats.push(Object.fromEntries((rec?.trust.categories ?? []).map((c) => [c.name, c.status])));
@@ -127,6 +135,8 @@ export function runScenario(w: World, sc: Scenario): ScenarioResult {
     chk("adapts", !usedCancelled && (switches.length > 0 || later),
       `${switches.length} switch(es), arrival ${first ? w.city.hhmm(first) : "-"} -> ${last ? w.city.hhmm(last) : "-"}, cancelled trip kept: ${usedCancelled}`);
   }
+  if (e.transfer) chk("transfer", !!transfer, transfer ? `${transfer}, change shown on the map` : "no way with a change");
+  if (e.no_bus_promised) chk("no_bus_promised", !promised, promised ? `promised ${promised}` : "unknown-hours buses never promised");
   if (e.always_has_plan) chk("always_has_plan", hasPlanAll, `${samples.length} steps`);
   if (e.still_on_time === "yes") { const ps = ap.planset!; const rec = ps.plans.find((p) => p.id === ps.recommendedId); chk("still_on_time", !!rec?.feasible.worst, `final ${JSON.stringify(rec?.feasible)}`); }
   if (e.confidence_drops) chk("confidence_drops", conf0 - minConf >= 0.1, `${conf0.toFixed(2)} -> ${minConf.toFixed(2)}`);

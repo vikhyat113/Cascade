@@ -1,0 +1,4 @@
+{ "id": "transfer_route", "name": "9. Transfer route", "seed": 42, "pretend_night_buses": true,
+  "description": "IIIT Nagpur (Waranga) to Sitabuldi with the Demo switch 'Pretend night buses run': bus E2 to Butibori, change, bus E1 up Wardha Road. The change stop is shown and the wait is counted.",
+  "request": { "from": "start", "to": "Sitabuldi City Bus Stand", "finish": "22:30", "by": "01:00" }, "events": [], "end": "22:50",
+  "expect": { "never_unknown_as_value": true, "always_has_plan": true, "transfer": true, "still_on_time": "yes" } }

@@ -77,6 +77,7 @@ export const CONFIG = {
     unknownHeadwayMin: 30,    // expected wait when even the headway is unknown
     clusterM: 60,             // stops this close with the same name are one place
     maxItineraries: 4,
+    maxWaitMin: 60,           // a vehicle further off than this is "no service until hh:mm", never a way (a 6 h wait for the first metro)
   },
   presentation: {
     // UI_SPEC suggests 75 / 50; worst-case scores here sit between ~40 (long dark walk) and ~72 (inside a
