@@ -57,7 +57,7 @@ export function Pill({ connection, long = false }: { connection: "live" | "offli
   const { t } = useT();
   const live = connection === "live";
   return (
-    <div className="pointer-events-none fixed left-0 right-0 top-3 z-30 flex justify-center">
+    <div className="pointer-events-none fixed left-3 top-3 z-30 flex max-w-[calc(100%-6rem)]">
       <div role="status" aria-live="polite"
         className="flex min-h-9 items-center gap-2 rounded-full border border-edge bg-surface/95 px-4 text-[0.95rem] font-semibold">
         <span className={`inline-block h-2.5 w-2.5 rounded-full ${live ? "bg-good" : "bg-soft"}`} aria-hidden="true" />
@@ -75,7 +75,7 @@ export function Banner({ id, text, onSee, onDone }: { id: string; text: string; 
   // the timer belongs to this banner (id), not to each live update re-render
   useEffect(() => { const h = window.setTimeout(() => done.current(), 8000); return () => window.clearTimeout(h); }, [id]);
   return (
-    <div className="fixed inset-x-0 top-14 z-40 flex justify-center px-3">
+    <div className="fixed inset-x-0 top-[5rem] z-40 flex justify-center px-3">
       <div role="alert" className="flex w-full max-w-[480px] items-center gap-3 rounded-2xl bg-warn px-4 py-3 text-night shadow-xl">
         <span className="flex-1 text-[1.05rem] font-bold">{text}</span>
         {onSee && (

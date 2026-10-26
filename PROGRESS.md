@@ -59,8 +59,14 @@
 - Checks: 56 app tests + 53 Python backend tests pass; browser run on the new city works (plan 0.9 s for IIIT → Dharampeth).
 - Unverified: planning time on the phone for the 25 km trip; Waranga as IIIT stand-in.
 
+### U5: SOS on every screen (done, tag up-5)
+- Red **SOS** button (56 px, top-right, above every sheet, banner, dialog and the Demo drawer) on every screen, including the loading screen. One tap opens Help at once; Call 112 is the first control; the danger / doctor / not sure choice inside the sheet is the only guard.
+- Place for help: a fresh GPS fix (5 s), else the last known place ("Using last place."), else "No place yet. Call 112." (the SMS then has no map link). A fix outside the zones keeps the app's (demo) place.
+- Status pill moved left, map credit under it, trip card and banners below the top row. No flag can hide SOS.
+- Tests: SOS unit test (label + screen-reader name in EN/HI, size, layer) and `npm run e2e` (Chrome, 360 px, EN + HI: first screen, home, about, demo drawer, search, open now, result, trip, help: visible, 56 px, not covered; Call 112 first). All pass.
+
 ## Commands
-- Tests: `cd frontend && npm test` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
+- Tests: `cd frontend && npm test` · SOS on every screen: `npm run build && npm run e2e` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 
 ## Commands (dispatch)
 - `cd server && npm install && npm start`, then put the printed Wi-Fi address in Demo → 8. Dispatch server.

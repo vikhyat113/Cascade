@@ -147,6 +147,13 @@ export const en = {
 
   "line.meshOn": "Passing on help requests nearby.",
 
+  "label.sos": "SOS",
+  "label.sosLong": "Get help now",
+  "line.usingLastPlace": "Using last place.",
+
+  "line.smsNoPlace": "I need help. Please call me now.",
+  "line.noPlaceCall": "No place yet. Call 112.",
+
   "reason.lit": "lit roads",
   "reason.mainRoads": "main roads",
   "reason.shopsOpen": "shops open on the way",

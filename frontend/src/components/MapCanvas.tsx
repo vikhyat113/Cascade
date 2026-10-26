@@ -69,8 +69,9 @@ export function MapCanvas({ center, bbox, path, start, end, me, places, fitKey, 
     const m = L.map(box.current, { zoomControl: false, attributionControl: false, preferCanvas: true, minZoom: 12, maxZoom: CONFIG.map.maxZoom,
       maxBounds: bounds, maxBoundsViscosity: 0.9 })
       .setView([center.lat, center.lon], 14);
-    // the OpenStreetMap credit must stay visible: top-right, above the sheets (bottom-right is always covered)
-    L.control.attribution({ position: "topright", prefix: false }).addTo(m);
+    // the OpenStreetMap credit must stay visible: top-left under the status pill (SOS owns the top-right,
+    // the sheets cover the bottom)
+    L.control.attribution({ position: "topleft", prefix: false }).addTo(m);
     const tiles = L.tileLayer(CONFIG.map.tileUrl, {
       className: "nw-tiles", maxZoom: CONFIG.map.maxZoom,
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',

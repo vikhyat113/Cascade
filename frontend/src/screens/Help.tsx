@@ -36,9 +36,9 @@ const Call112 = () => {
   return <a href="tel:112" className="flex min-h-14 w-full items-center justify-center rounded-2xl bg-help text-[1.25rem] font-bold text-white">📞 {t("label.call112")}</a>;
 };
 
-export function TextContact({ at, late = false }: { at: Place; late?: boolean }) {
+export function TextContact({ at, late = false }: { at: Place | null; late?: boolean }) {
   const { t } = useT();
-  const body = t(late ? "fmt.smsLate" : "fmt.smsHelp", { link: mapLink(at.lat, at.lon) });
+  const body = at ? t(late ? "fmt.smsLate" : "fmt.smsHelp", { link: mapLink(at.lat, at.lon) }) : t("line.smsNoPlace");
   return (
     <a href={smsHref(body)} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-edge bg-raised px-4 font-semibold text-ink">
       💬 {t("label.textContact")}
@@ -47,13 +47,18 @@ export function TextContact({ at, late = false }: { at: Place; late?: boolean })
 }
 
 /** Help (spec §9): three big choices, then plain progress. Call 112 and Text my contact always visible. */
-export function HelpSheet({ at, onClose, onGo }: { at: Place; onClose: () => void; onGo: (p: PlaceOnWay) => void }) {
+/** `at`: where help should come (a fresh GPS fix, else the last known place, else unknown). `fresh`
+ *  false shows "Using last place." */
+export function HelpSheet({ at, fresh, onClose, onGo }: { at: Place | null; fresh: boolean; onClose: () => void; onGo: (p: PlaceOnWay) => void }) {
   const { t, lang } = useT();
   const help = useHelp();
   const [again, setAgain] = useState(false);          // a new request after the last one finished
   const choosing = !help || again;
   const [near, setNear] = useState<{ hospital: PlaceOnWay | null; police: PlaceOnWay | null } | null>(null);
-  useEffect(() => { call("help", at.lat, at.lon).then(setNear).catch(() => setNear({ hospital: null, police: null })); }, [at, lang]);
+  useEffect(() => {
+    if (!at) { setNear({ hospital: null, police: null }); return; }
+    call("help", at.lat, at.lon).then(setNear).catch(() => setNear({ hospital: null, police: null }));
+  }, [at?.lat, at?.lon, lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const st = help ? STATUS[help.status] : null;
   const target = help && help.target !== "contact" ? near?.[help.target] ?? null : null;
@@ -61,7 +66,9 @@ export function HelpSheet({ at, onClose, onGo }: { at: Place; onClose: () => voi
     <Overlay onClose={onClose} label={t("label.help")}>
       <h2 className="text-[1.4rem] font-bold">🆘 {t("label.help")}</h2>
       <Call112 />
-      {choosing && CHOICES.map((c) => (
+      {at && !fresh && <p className="text-[0.95rem] text-soft">📍 {t("line.usingLastPlace")}</p>}
+      {!at && <p className="text-[1.05rem] font-semibold text-warn">{t("line.noPlaceCall")}</p>}
+      {choosing && at && CHOICES.map((c) => (
         <button key={c.type} onClick={() => { setAgain(false); askForHelp(c.type, at); }}
           className="flex min-h-16 w-full items-center gap-3 rounded-2xl border-2 border-help/70 bg-raised px-4 text-left text-[1.3rem] font-bold">
           <span aria-hidden="true" className="text-[1.6rem]">{c.icon}</span>{t(c.key)}

@@ -3,10 +3,11 @@ import { CONFIG } from "./config";
 import { useT, type CopyKey } from "./copy";
 import type { TripAsk } from "./engine/worker";
 import { MapCanvas } from "./components/MapCanvas";
+import { SosButton } from "./components/SosButton";
 import { BackButton, Banner, Pill } from "./components/ui";
 import { call, listen } from "./lib/engine";
 import { useLive } from "./lib/live";
-import { lastTrip, loadFlag, loadPlace, myLocation, rememberTrip, saveFlag, savePlace } from "./lib/saved";
+import { freshFix, lastTrip, loadFlag, loadLastFix, loadPlace, myLocation, rememberTrip, saveFlag, saveLastFix, savePlace } from "./lib/saved";
 import { alertContact, restoreRealBluetooth } from "./sos";
 import { armTimer, disarmTimer, loadTimer, onTimerTapped, saveTimer, timerTimes } from "./sos/safetyTimer";
 import { Home, NEEDS } from "./screens/Home";
@@ -51,7 +52,9 @@ function Main() {
   const [error, setError] = useState<string | null>(null);
   const [need, setNeed] = useState<{ type: string; title: string; places: PlaceOnWay[] | null; empty: string | null } | null>(null);
   const [showPlaces, setShowPlaces] = useState(false);
-  const [helpAt, setHelpAt] = useState<Place | null>(null);
+  const [help, setHelp] = useState<{ at: Place | null; fresh: boolean } | null>(null);
+  const lastFix = useRef<Place | null>(null);
+  useEffect(() => { loadLastFix().then((p) => { if (p && !lastFix.current) lastFix.current = { ...p, name: "" }; }); }, []);
   const [sheetH, setSheetH] = useState(380);
   const [bannerId, setBannerId] = useState<string | null>(null);
   const [demoOpen, setDemoOpen] = useState(false);
@@ -130,7 +133,20 @@ function Main() {
     const tm = await loadTimer();
     if (tm) await saveTimer({ ...tm, answered: true });
     setSafety(null);
-    setHelpAt(here());
+    openHelp();
+  };
+
+  /** SOS: open Help at once with the place we have, then try for a fresh GPS fix. A fix outside the
+   *  area means demo mode (the app's place is simulated), so the app's place is kept. */
+  const openHelp = () => {
+    setHelp({ at: here() ?? lastFix.current, fresh: false });
+    freshFix().then(async (p) => {
+      if (!p) return;
+      saveLastFix(p);
+      lastFix.current = { ...p, name: "" };
+      const inside = await call("inArea", p.lat, p.lon).catch(() => false);
+      if (inside || !here()) setHelp((h) => (h ? { at: { ...p, name: "" }, fresh: true } : h));
+    });
   };
 
   // ---- one banner at a time, each shown once ---------------------------------------------------
@@ -215,7 +231,7 @@ function Main() {
   const goTo = (p: PlaceOnWay) => {
     const dest: Place = { lat: p.lat, lon: p.lon, name: p.name, kind: null };
     setTo(dest);
-    setHelpAt(null);
+    setHelp(null);
     find(dest);
   };
 
@@ -262,6 +278,8 @@ function Main() {
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center" role="status">
         <span className="text-[2.5rem]" aria-hidden="true">🌙</span>
         <p className="text-[1.2rem] font-semibold">{error || t("line.finding")}</p>
+        <SosButton onPress={openHelp} />
+        {help && <HelpSheet at={help.at} fresh={help.fresh} onClose={() => setHelp(null)} onGo={() => setHelp(null)} />}
       </div>
     );
   }
@@ -301,14 +319,15 @@ function Main() {
       )}
       {screen === "trip" && current && (
         <Trip option={current} trip={view?.trip ?? null} onEnd={endTrip} onBackup={onBackup} onHeight={setSheetH} {...demo}
-          onHelp={() => setHelpAt(here())} />
+          onHelp={openHelp} />
       )}
       {screen === "opennow" && need && (
         <OpenNow title={need.title} places={need.places} empty={need.empty} onBack={() => setScreen("home")}
           onPick={goTo} onHeight={setSheetH} />
       )}
-      {helpAt && <HelpSheet at={helpAt} onClose={() => setHelpAt(null)} onGo={goTo} />}
-      {safety && !helpAt && from && <SafetySheet at={here() ?? from} late={safety === "late"} onHome={imHome} onHelp={safetyHelp} />}
+      {help && <HelpSheet at={help.at} fresh={help.fresh} onClose={() => setHelp(null)} onGo={goTo} />}
+      {safety && !help && from && <SafetySheet at={here() ?? from} late={safety === "late"} onHome={imHome} onHelp={safetyHelp} />}
+      <SosButton onPress={openHelp} />
 
       <Suspense fallback={null}>
         {demoOpen && <DemoDrawer view={view} onClose={() => setDemoOpen(false)} />}

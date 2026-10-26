@@ -14,7 +14,7 @@ export function Trip({ option, trip, onHelp, onEnd, onBackup, showDemo, onDemo, 
   const pct = Math.round((trip?.progress ?? 0) * 100);
   return (
     <>
-      <div className="fixed inset-x-0 top-14 z-20 flex justify-center px-3">
+      <div className="fixed inset-x-0 top-[5rem] z-20 flex justify-center px-3">
         <div className="flex w-full max-w-[480px] items-center gap-3 rounded-3xl border border-edge bg-surface px-4 py-3 shadow-xl" aria-live="polite">
           <span className="text-[2.2rem]" aria-hidden="true">{STEP_ICON[trip?.next_icon || "walk"]}</span>
           <p className="text-[1.6rem] font-bold leading-tight">{trip?.next_text}</p>

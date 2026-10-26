@@ -22,3 +22,6 @@ Each request: what it was, which layer it touched, what was done.
 - **Layer**: data build scripts (`scripts/area.py`, `geocode_places.py`, `fetch_graph.py`, `fetch_pois.py`, `fetch_weather.py`, `build_transit.py`), `tools/build_data.py`, config, engine (`world.ts` zones), map bounds, location check.
 - Zones instead of one radius; every Noida reference removed outside `legacy/`. Old Noida data stays in git history.
 
+## 5. UPGRADE U5: SOS on every screen (tag up-5)
+- **Layer**: new component `SosButton`, App (Help opens with the best place), Help sheet (last place / no place), copy (EN + HI), layout (pill left, cards lower), e2e test.
+

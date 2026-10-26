@@ -26,6 +26,17 @@ export function savePlace(slot: Slot, p: Place): void { write(`nw.${slot}`, { la
 export async function loadFlag(key: string): Promise<boolean> { return (await read<boolean>(`nw.${key}`)) === true; }
 export function saveFlag(key: string, on: boolean): void { write(`nw.${key}`, on); }
 
+/** The last real GPS fix, for SOS while a new fix is slow ("Using last place"). */
+export const loadLastFix = () => read<{ lat: number; lon: number }>("nw.lastFix");
+export function saveLastFix(p: { lat: number; lon: number }): void { write("nw.lastFix", { lat: p.lat, lon: p.lon }); }
+
+/** A fresh GPS fix for SOS, or null within the time limit. */
+export async function freshFix(timeoutMs = 5000): Promise<{ lat: number; lon: number } | null> {
+  const fix = Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 20000 }).catch(() => null);
+  const pos = await Promise.race([fix, new Promise<null>((r) => window.setTimeout(() => r(null), timeoutMs + 500))]);
+  return pos ? { lat: pos.coords.latitude, lon: pos.coords.longitude } : null;
+}
+
 export async function loadLang(): Promise<Lang> { return (await read<Lang>("nw.lang")) === "hi" ? "hi" : "en"; }
 export function saveLang(l: Lang): void { write("nw.lang", l); }
 
@@ -41,5 +52,6 @@ export async function myLocation(defaults: UiDefaults): Promise<Place> {
   const pos = await Promise.race([fix, new Promise<null>((r) => window.setTimeout(() => r(null), 5000))]);
   if (!pos) return demo;
   const { latitude: lat, longitude: lon } = pos.coords;
+  saveLastFix({ lat, lon });
   return (await call("inArea", lat, lon).catch(() => false)) ? { lat, lon, name: "", kind: "here" } : demo;
 }

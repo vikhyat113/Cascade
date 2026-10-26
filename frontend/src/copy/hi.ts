@@ -147,6 +147,13 @@ export const hi: Record<CopyKey, string> = {
 
   "line.meshOn": "पास के मदद संदेश आगे भेज रहा है।",
 
+  "label.sos": "SOS",
+  "label.sosLong": "अभी मदद लें",
+  "line.usingLastPlace": "पिछली जगह से।",
+
+  "line.smsNoPlace": "मुझे मदद चाहिए। कृपया अभी कॉल करें।",
+  "line.noPlaceCall": "जगह अभी पता नहीं। 112 पर कॉल करें।",
+
   "reason.lit": "रोशनी वाली सड़कें",
   "reason.mainRoads": "मुख्य सड़कें",
   "reason.shopsOpen": "रास्ते में दुकानें खुली",
