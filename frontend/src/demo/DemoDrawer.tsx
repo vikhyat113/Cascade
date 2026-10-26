@@ -1,35 +1,30 @@
-import { CONFIG } from "../config";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import type { SimpleView } from "../types";
-import { ago, anyLive, demo, OFFICIAL, type LogLine, type SimState, type Source, type Status } from "./demoApi";
-import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl, useHelp } from "../sos";
-import { BleSection } from "./BleSection";
-import { FakeGpsSection } from "./FakeGpsSection";
-import { HereSection } from "./HereSection";
-import { LocationCheck } from "./LocationCheck";
-import { fireTimerSoon } from "../sos/safetyTimer";
-import { MeshGraph } from "./MeshGraph";
+import { api } from "../api";
+import type { AreaDiagnostics, LayerMeta, PlanRoutesResponse, SimpleView } from "../types";
+import { ago, demo, OFFICIAL, type SimState, type Source, type Status } from "./demoApi";
 import { ScenariosTable } from "./ScenariosTable";
 
-/** Hidden Demo drawer (spec §11), for judges: technical words are allowed here. The normal screens
- *  react on their own (pill, banner, Backup) because they only render what the engine pushes. */
+/** Hidden Demo drawer (UI_SPEC §5). For judges: technical words are allowed here. The main
+ *  screens react on their own (pill, banner, Backup) because they only read the plan stream. */
 export default function DemoDrawer({ view, onClose }: { view: SimpleView | null; onClose: () => void }) {
   const [sim, setSim] = useState<SimState | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
+  const [areaDiag, setAreaDiag] = useState<AreaDiagnostics | null>(null);
+  const [layersList, setLayersList] = useState<LayerMeta[]>([]);
+  const [routesData, setRoutesData] = useState<PlanRoutesResponse | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [time, setTime] = useState("");
-  const [open, setOpen] = useState<Record<string, boolean>>({ break: true, happen: true, time: true });
-  const [log, setLog] = useState<LogLine[]>([]);
-  const [url, setUrl] = useState(getDispatchUrl());
-  const helpRun = useHelp();
-  const [, bump] = useState(0);
-  const flip = (f: () => void) => { f(); bump((n) => n + 1); };
+  const [open, setOpen] = useState<Record<string, boolean>>({ break: true, happen: true, time: true, area: true, layers: true, multiroute: true });
 
   const refresh = useCallback(() => {
     demo.sim().then(setSim).catch(() => {});
     demo.trust().then((t) => setSources(t.sources)).catch(() => {});
-    demo.log().then((l) => setLog([...l].reverse())).catch(() => {});
-  }, []);
+    demo.area().then(setAreaDiag).catch(() => {});
+    api.layers().then(setLayersList).catch(() => {});
+    if (view?.id) {
+      api.planRoutes(view.id).then(setRoutesData).catch(() => {});
+    }
+  }, [view?.id]);
   useEffect(() => { refresh(); const id = window.setInterval(refresh, 2000); return () => window.clearInterval(id); }, [refresh]);
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
@@ -38,12 +33,13 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
   };
   const planId = view?.id ?? null;
   // "All live info" reads ON while any live feed still works, so one tap always means "kill them all"
-  const on = (id: string) => (id === "all_live" ? anyLive(sim?.sources) : !!sim?.sources[id]);
+  const on = (id: string) => (id === "all_live"
+    ? ["traffic_live", "transit_realtime", "weather_live", "closures_feed", "cab_availability", "incident_reports"].some((k) => sim?.sources[k])
+    : !!sim?.sources[id]);
 
   const Toggle = ({ id, label }: { id: string; label: string }) => (
-    <button onClick={() => act(() => demo.outage(id as Parameters<typeof demo.outage>[0], !on(id)), `${label} ${on(id) ? "OFF" : "ON"}`)}
-      disabled={!sim}   /* until the current state is known, a tap could flip the wrong way */
-      className={`flex min-h-14 items-center justify-between gap-2 rounded-2xl border px-4 font-bold disabled:opacity-40 ${on(id) ? "border-good/60 bg-good/10" : "border-bad/60 bg-bad/10"}`}
+    <button onClick={() => act(() => demo.outage(id, !on(id)), `${label} ${on(id) ? "OFF" : "ON"}`)}
+      className={`flex min-h-14 items-center justify-between gap-2 rounded-2xl border px-4 font-bold ${on(id) ? "border-good/60 bg-good/10" : "border-bad/60 bg-bad/10"}`}
       aria-pressed={on(id)}>
       <span>{label}</span><span className={on(id) ? "text-good" : "text-bad"}>{on(id) ? "ON" : "OFF"}</span>
     </button>
@@ -61,6 +57,7 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
     </section>
   );
 
+  const log = [...(view?.details?.change_log ?? [])].reverse();
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60" onClick={onClose}>
       <div className="scroll-quiet max-h-[88dvh] w-full max-w-[680px] overflow-y-auto rounded-t-3xl border-t border-edge bg-surface px-5 pb-8 pt-4"
@@ -73,9 +70,9 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
 
         <Section id="break" title="1. Break things">
           <div className="grid grid-cols-2 gap-2">
-            <Toggle id="traffic" label="Traffic info" />
+            <Toggle id="traffic_live" label="Traffic info" />
             <Toggle id="transit_realtime" label="Bus info" />
-            <Toggle id="weather" label="Weather info" />
+            <Toggle id="weather_live" label="Weather info" />
             <Toggle id="all_live" label="All live info" />
           </div>
           <p className="mt-2 text-[0.9rem] text-soft">Feeds that stop just age: Known → Probable → Outdated → Unknown. Use “+5 min” to see it.</p>
@@ -86,31 +83,20 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
             {sim?.truth.rain
               ? <Act label="Rain stops" onClick={() => act(() => demo.inject("rain_stop", {}), "Rain stopped")} />
               : <Act label="Rain starts" onClick={() => act(() => demo.inject("rain_start", { intensity: "heavy" }), "Heavy rain started (ground truth)")} />}
-            <Act label="Road closed" disabled={!planId} onClick={() => act(() => demo.inject("road_closure", { edge_selector: "main_road_nearest_route", reason: "police barricade" }), "Main road on the way closed")} />
-            <Act label="Bus cancelled" disabled={!planId} onClick={() => act(() => demo.inject("bus_cancelled", {}), "Bus cancelled")} />
-            <Act label="Accident" disabled={!planId} onClick={() => act(() => demo.inject("accident", { edge_selector: "main_road_nearest_route" }), "Accident on the way")} />
+            <Act label="Road closed" disabled={!planId} onClick={() => act(() => demo.inject("road_closure", { edge_selector: "main_road_nearest_route", reason: "police barricade" }, planId), "Main road on the way closed")} />
+            <Act label="Bus cancelled" disabled={!planId} onClick={() => act(() => demo.inject("bus_cancelled", {}, planId), "Bus cancelled")} />
+            <Act label="Accident" disabled={!planId} onClick={() => act(() => demo.inject("accident", { edge_selector: "main_road_nearest_route" }, planId), "Accident on the way")} />
           </div>
           {!planId && <p className="mt-2 text-[0.9rem] text-soft">Find a way first: these act on the current trip.</p>}
-          <button onClick={() => act(() => demo.pretend(!sim?.pretend), sim?.pretend ? "Night buses: real hours only" : "Pretend night buses run (SIMULATED): routes with unknown hours get assumed trips")}
-            disabled={!sim} aria-pressed={!!sim?.pretend}
-            className={`mt-2 flex min-h-12 w-full items-center justify-between rounded-2xl border px-4 font-semibold disabled:opacity-40 ${sim?.pretend ? "border-warn/60 bg-warn/10" : "border-edge bg-raised"}`}>
-            <span>Pretend night buses run (simulated)</span><span className={sim?.pretend ? "text-warn" : "text-soft"}>{sim?.pretend ? "ON" : "off"}</span>
-          </button>
-          <p className="mt-1 text-[0.85rem] text-soft">No Nagpur bus route has real night hours (docs/TRANSIT_DATA.md): E1-E4 are estimated, the Metro runs 06:00-22:00. Off: buses are “Not sure”.</p>
         </Section>
 
         <Section id="time" title="3. Time">
-          <p className="mb-2 font-mono text-[1.1rem]">App clock {sim ? sim.now_text : "--:--"} {sim?.paused ? "(paused)" : `×${sim?.speed}`}</p>
-          <button onClick={() => act(() => demo.clock({ time: "02:15" }), "Clock set to 2:15 AM; the trip was planned again for that time")}
-            className="mb-2 min-h-14 w-full rounded-2xl bg-accent px-4 text-[1.1rem] font-bold text-accent-ink">Set to 2:15 AM</button>
+          <p className="mb-2 font-mono text-[1.1rem]">{sim ? sim.now.slice(11, 19) : "--:--:--"} {sim?.paused ? "(paused)" : `×${sim?.speed}`}</p>
           <div className="flex flex-wrap gap-2">
-            <Act label={sim?.paused ? "▶ Run" : "⏸ Pause"} onClick={() => act(() => demo.clock({ paused: !sim?.paused }), sim?.paused ? "Clock running" : "Clock paused")} />
-            {[1, 10, 60].map((s) => (
-              <button key={s} onClick={() => act(() => demo.clock({ speed: s, paused: false }), `Speed ${s}×`)} aria-pressed={sim?.speed === s && !sim?.paused}
-                className={`min-h-12 rounded-2xl border px-4 font-semibold ${sim?.speed === s && !sim?.paused ? "border-accent bg-accent/15" : "border-edge bg-raised"}`}>{s}×</button>
-            ))}
-            <Act label="+5 min" onClick={() => act(() => demo.clock({ advance_s: 300 }), "+5 min (facts age)")} />
-            <Act label="Back to real time" onClick={() => act(() => demo.reset(), "Night reset to the phone's real time; sources back on")} />
+            <Act label={sim?.paused ? "▶ Run" : "⏸ Pause"} onClick={() => act(() => demo.clock({ paused: !sim?.paused }), "Clock")} />
+            {[1, 10, 60].map((s) => <Act key={s} label={`${s}×`} onClick={() => act(() => demo.clock({ speed: s, paused: false }), `Speed ${s}×`)} />)}
+            <Act label="+5 min" onClick={() => act(() => demo.clock({ advance_s: 300 }), "+5 min")} />
+            <Act label="Reset" onClick={() => act(() => demo.reset(), "Simulation reset (02:00, paused)")} />
           </div>
           <div className="mt-2 flex gap-2">
             <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="Set sim time"
@@ -125,7 +111,6 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
         </Section>
 
         <Section id="data" title="5. Data check">
-          <LocationCheck />
           <div className="mb-2 flex flex-wrap gap-2 text-[0.9rem]">
             {(Object.keys(OFFICIAL) as Status[]).map((s) => (
               <span key={s} className="rounded-full border px-2 py-0.5" style={{ borderColor: OFFICIAL[s].color, color: OFFICIAL[s].color }}>
@@ -138,7 +123,7 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
               <li key={s.id} className="flex items-center justify-between gap-2 rounded-xl bg-raised px-3 py-2">
                 <span className="min-w-0">
                   <span className="font-semibold">{s.label}</span>
-                  <span className="ml-2 text-[0.85rem] text-soft">{s.synthetic ? "simulated" : s.live ? "real" : "real (cached)"} · age {ago(s.age_s)}{!s.enabled ? " · switched off" : ""}</span>
+                  <span className="ml-2 text-[0.85rem] text-soft">{s.synthetic ? "simulated" : "real (cached)"} · age {ago(s.age_s)}{!s.enabled ? " · switched off" : ""}</span>
                 </span>
                 <span className="shrink-0 rounded-full border px-2 py-0.5 text-[0.85rem] font-bold"
                   style={{ borderColor: OFFICIAL[s.status].color, color: OFFICIAL[s.status].color }}>
@@ -149,10 +134,160 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
           </ul>
         </Section>
 
-        <Section id="log" title="6. Change log (technical)">
+        <Section id="area" title="6. Area verification (Data Trust)">
+          {areaDiag ? (
+            <div className="space-y-2 text-[0.88rem]">
+              {areaDiag.placeholder_suspect && (
+                <div className="rounded-xl border border-bad/80 bg-bad/20 p-3 font-semibold text-bad">
+                  ⚠️ Red Warning: Placeholder / synthetic regular polygon suspect (distances from centroid within 3% or regular 17-gon)
+                </div>
+              )}
+              {areaDiag.area_mode === "circle_fallback" && (
+                <div className="rounded-xl border border-bad/80 bg-bad/20 p-3 font-semibold text-bad">
+                  ⚠️ Red Warning: Using circular fallback mode (no polygon configured)
+                </div>
+              )}
+              {areaDiag.stale_data && (
+                <div className="rounded-xl border border-bad/80 bg-bad/20 p-3 font-semibold text-bad">
+                  ⚠️ Red Warning: Stale data — graph or POIs generated before polygon file modified time! Run python scripts/fetch_all.py --force
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-raised p-2.5">
+                  <div className="text-[0.75rem] text-soft">Area Mode</div>
+                  <div className="font-bold">
+                    <span className={`inline-block rounded-md px-2 py-0.5 text-[0.8rem] ${areaDiag.area_mode === "polygon" ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}>
+                      {areaDiag.area_mode}
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-raised p-2.5">
+                  <div className="text-[0.75rem] text-soft">Coverage Area</div>
+                  <div className="font-bold">{areaDiag.area_km2} km² · {areaDiag.vertex_count} vertices</div>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-raised p-2.5">
+                <div className="text-[0.75rem] text-soft">Area Source File</div>
+                <div className="break-all font-mono text-[0.8rem] text-ink">{areaDiag.area_source}</div>
+                <div className="mt-1 text-[0.75rem] text-soft">Source modified: <span className="font-mono text-ink">{areaDiag.source_mtime || "N/A"}</span></div>
+              </div>
+
+              <div className="rounded-xl bg-raised p-2.5">
+                <div className="text-[0.75rem] text-soft">Bounding Box [minLon, minLat, maxLon, maxLat]</div>
+                <div className="font-mono text-[0.8rem] text-ink">{JSON.stringify(areaDiag.bbox)}</div>
+              </div>
+
+              <div className="rounded-xl bg-raised p-2.5">
+                <div className="text-[0.75rem] text-soft">Graph Nodes & Edges</div>
+                <div className="mt-1 flex justify-between text-[0.82rem]">
+                  <span>Walk: {areaDiag.walk_nodes} nodes, {areaDiag.walk_edges} edges</span>
+                  <span className="font-semibold text-good">{areaDiag.walk_nodes_inside}/{areaDiag.walk_nodes} inside</span>
+                </div>
+                <div className="mt-1 flex justify-between text-[0.82rem]">
+                  <span>Drive: {areaDiag.drive_nodes} nodes, {areaDiag.drive_edges} edges</span>
+                  <span className="font-semibold text-good">{areaDiag.drive_nodes_inside}/{areaDiag.drive_nodes} inside</span>
+                </div>
+                <div className="mt-1.5 flex items-center justify-between border-t border-edge/60 pt-1 font-semibold">
+                  <span>Share of nodes inside polygon:</span>
+                  <span className={areaDiag.share_nodes_inside >= 99 ? "text-good" : "text-bad"}>
+                    {areaDiag.share_nodes_inside.toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-raised p-2.5">
+                  <div className="text-[0.75rem] text-soft">POIs Inside Area</div>
+                  <div className="font-bold text-good">{areaDiag.pois_inside}</div>
+                </div>
+                <div className="rounded-xl bg-raised p-2.5">
+                  <div className="text-[0.75rem] text-soft">POIs Outside Area</div>
+                  <div className="font-bold text-soft">{areaDiag.pois_outside}</div>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-raised p-2.5">
+                <div className="text-[0.75rem] text-soft">Data Generation Timestamps</div>
+                <div className="mt-1 text-[0.8rem]">
+                  <div>graph_walk: <span className="font-mono text-ink">{areaDiag.walk_generated_at || "N/A"}</span></div>
+                  <div>pois.json: <span className="font-mono text-ink">{areaDiag.pois_generated_at || "N/A"}</span></div>
+                  <div>area modified: <span className="font-mono text-ink">{areaDiag.source_mtime || "N/A"}</span></div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-soft">Loading area diagnostics…</p>
+          )}
+        </Section>
+
+        <Section id="layers" title="7. Data Layers (Polygon-Clipped & Live)">
+          <div className="space-y-3">
+            {layersList.map((layer) => {
+              const chip = layer.status_chip || "CACHED";
+              let chipColor = "#38bdf8";
+              if (chip === "LIVE") chipColor = "#34d399";
+              else if (chip === "STALE") chipColor = "#fbbf24";
+              else if (chip === "OFFLINE") chipColor = "#f87171";
+
+              // Check if older than TTL
+              // Weather TTL = 15m (live) / 24h (forecast). Thermal TTL = 3 days. VIIRS TTL = 45 days.
+              const ttlS = layer.id === "weather_grid" ? 86400 : layer.id === "thermal_lst" ? 259200 : 3888000;
+              const isOlderThanTtl = (layer.age_s ?? 0) > ttlS;
+              const isMissingOrStale = !layer.available || layer.older_than_area || isOlderThanTtl;
+
+              return (
+                <div key={layer.id} className="rounded-xl border border-edge bg-raised p-3 text-[0.85rem]">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-ink">{layer.name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className="rounded-md px-2 py-0.5 text-[0.75rem] font-bold"
+                        style={{ backgroundColor: `${chipColor}22`, color: chipColor, border: `1px solid ${chipColor}44` }}
+                      >
+                        {chip}
+                      </span>
+                      <span className="font-mono text-[0.78rem] text-soft">{ago(layer.age_s)}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[0.8rem] text-soft">
+                    <div>Live flag: <span className={layer.live ? "text-good font-semibold" : "text-soft"}>{layer.live ? "ON" : "OFF"}</span></div>
+                    <div>Status: <span className="text-ink font-semibold">{layer.status}</span></div>
+                    <div>Source: <span className="text-ink">{layer.source}</span></div>
+                    <div>Resolution: <span className="text-ink">{layer.native_resolution}</span></div>
+                    <div>Last fetch / retrieved: <span className="font-mono text-ink text-[0.75rem]">{layer.retrieved_at ? layer.retrieved_at.slice(0, 19) + "Z" : "N/A"}</span></div>
+                    <div>Newest timestamp: <span className="font-mono text-ink text-[0.75rem]">{layer.last_pass_date || (layer.retrieved_at ? layer.retrieved_at.slice(0, 10) : "N/A")}</span></div>
+                    <div>Inside polygon: <span className="text-ink font-semibold">{layer.cell_count} cells</span></div>
+                    <div>UNKNOWN share: <span className="text-good font-semibold">{layer.unknown_share}%</span></div>
+                  </div>
+
+                  {layer.error && (
+                    <div className="mt-2 rounded-lg bg-bad/20 border border-bad/50 p-2 text-[0.8rem] font-semibold text-bad">
+                      Error: {layer.error}
+                    </div>
+                  )}
+
+                  {isMissingOrStale && (
+                    <div className="mt-2 rounded-lg bg-bad/20 border border-bad/50 p-2 text-[0.8rem] font-semibold text-bad">
+                      {!layer.available
+                        ? "⚠ Red Warning: Layer file missing from data/ directory!"
+                        : isOlderThanTtl
+                        ? `⚠ Red Warning: Layer file is older than its TTL (${Math.round(ttlS / 3600)}h)!`
+                        : "⚠ Warning: Layer file is older than area.geojson!"}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+
+        <Section id="log" title="8. Change log (technical)">
           {log.length === 0 && <p className="text-soft">Find a way to see every re-plan explained here.</p>}
           <ol className="max-h-72 space-y-1 overflow-y-auto font-mono text-[0.85rem]">
-            {log.map((e, i) => (
+            {log.map((e: { hhmm: string; severity: string; message: string; code: string }, i: number) => (
               <li key={i} className={e.severity === "alert" ? "text-bad" : e.severity === "warn" ? "text-warn" : "text-soft"}>
                 {e.hhmm} [{e.code}] {e.message}
               </li>
@@ -160,64 +295,84 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
           </ol>
         </Section>
 
-        <Section id="mesh" title="7. Mesh (simulated)">
-          <MeshGraph />
-          <p className="mt-2 text-[0.9rem] text-soft">
-            Simulated: {mesh.nodes.length} virtual phones, gossip relay, dedupe by id, hop limit {CONFIG.mesh.ttl},
-            store-and-forward at the gateway. Relayed {mesh.stats().relayed} · waiting at gateway {mesh.stats().waiting}
-            {mesh.stats().lastPacketAt ? ` · last packet ${ago((Date.now() - mesh.stats().lastPacketAt!) / 1000)} ago` : ""}. Real Bluetooth: off (Phase 7).
-          </p>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <button onClick={() => flip(() => { demoFlags.forceMesh = !demoFlags.forceMesh; })} aria-pressed={demoFlags.forceMesh}
-              className={`min-h-12 rounded-2xl border px-3 font-semibold ${demoFlags.forceMesh ? "border-accent bg-accent/15" : "border-edge bg-raised"}`}>
-              Help via mesh: {demoFlags.forceMesh ? "ON" : "off"}
-            </button>
-            <button onClick={() => flip(() => { mesh.gatewaySignal = !mesh.gatewaySignal; })} aria-pressed={mesh.gatewaySignal}
-              className={`min-h-12 rounded-2xl border px-3 font-semibold ${mesh.gatewaySignal ? "border-good/60 bg-good/10" : "border-bad/60 bg-bad/10"}`}>
-              Gateway signal: {mesh.gatewaySignal ? "ON" : "OFF"}
-            </button>
-          </div>
-          <p className="mt-1 text-[0.85rem] text-soft">“Help via mesh” pretends this phone can’t reach the server, so Help goes phone to phone.</p>
-        </Section>
+        <Section id="multiroute" title="9. Multi-Route Engine & Evaluation">
+          {!view?.id ? (
+            <p className="text-soft text-[0.9rem]">Find a way first to see multi-route Yen paths and evaluation breakdown.</p>
+          ) : !routesData ? (
+            <p className="text-soft text-[0.9rem]">Loading routes...</p>
+          ) : (
+            <div className="space-y-3 text-[0.88rem]">
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-raised p-3 text-[0.82rem]">
+                <div>Base Search: <span className="font-semibold text-ink">Dijkstra (Safety-aware cost)</span></div>
+                <div>Alternative Engine: <span className="font-semibold text-ink">Yen's K-Shortest Loopless Paths</span></div>
+                <div>Parameters: <span className="font-semibold text-ink">K=8 (max 12), Budget=1.5s, Buffer=1.5km</span></div>
+                <div>Diversity Filter: <span className="font-semibold text-ink">Overlap ≤ 70%, Cost ratio ≤ 1.6</span></div>
+                <div>Execution Time: <span className="font-mono font-semibold text-good">{routesData.routing_time_ms ? `${routesData.routing_time_ms.toFixed(1)} ms` : "N/A"}</span></div>
+                <div>Diverse Routes Kept: <span className="font-semibold text-ink">{routesData.routes.length}</span></div>
+                <div className="col-span-2">
+                  Decision Status:{" "}
+                  <span className={routesData.tie ? "font-semibold text-warn" : "font-semibold text-good"}>
+                    {routesData.tie ? `Close Choice / Honest Tie: ${routesData.tie_note || "Safety intervals overlap > 70%"}` : "Clear Winner Recommended"}
+                  </span>
+                </div>
+              </div>
 
-        <Section id="dispatch" title="8. Dispatch server (simulated police / hospital)">
-          <p className="mb-2 text-[0.9rem] text-soft">Run <code>cd server && npm start</code> on the laptop; use the Wi-Fi address it prints. Not real emergency services.</p>
-          <div className="flex gap-2">
-            <input value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Dispatch server URL" inputMode="url"
-              className="min-h-12 min-w-0 flex-1 rounded-xl border border-edge bg-raised px-3 text-ink" />
-            <Act label="Save + test" onClick={() => act(async () => {
-              setDispatchUrl(url);
-              if (!(await dispatch.reachable())) throw new Error(`can't reach ${getDispatchUrl()}`);
-            }, `Dispatch server reachable at ${url}`)} />
-          </div>
-          <button onClick={() => flip(() => { demoFlags.shortSteps = !demoFlags.shortSteps; })} aria-pressed={demoFlags.shortSteps}
-            className={`mt-2 min-h-12 w-full rounded-2xl border px-3 font-semibold ${demoFlags.shortSteps ? "border-accent bg-accent/15" : "border-edge bg-raised"}`}>
-            Short help steps: {demoFlags.shortSteps ? `ON (${CONFIG.dispatch.demoAckTimeoutS} s per desk)` : `off (${CONFIG.dispatch.ackTimeoutS} s per desk)`}
-          </button>
-          <p className="mt-1 text-[0.85rem] text-soft">Ladder: police, hospital, fire station (a doctor request asks the hospital first), then the nearest open place with people (no alert possible there).</p>
-          {helpRun && (
-            <ol className="mt-2 max-h-40 space-y-0.5 overflow-y-auto rounded-xl bg-raised p-2 font-mono text-[0.8rem]">
-              <li className="text-soft">help #{helpRun.id}: {helpRun.type}, step {helpRun.step + 1}/{helpRun.steps} ({helpRun.target}), status {helpRun.status}, via {helpRun.via ?? "-"}</li>
-              {helpRun.log.map((l, i) => <li key={i}>{l}</li>)}
-            </ol>
+              <div className="space-y-2">
+                <h4 className="font-bold text-ink">Candidate Routes & Score Breakdown:</h4>
+                {routesData.routes.map((r) => (
+                  <div
+                    key={r.id}
+                    className={`rounded-xl border p-3 ${
+                      r.recommended
+                        ? "border-accent/60 bg-accent/10"
+                        : r.dominated
+                        ? "border-edge/50 bg-raised/30 opacity-70"
+                        : "border-edge bg-raised"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-ink">{r.label} ({r.id})</span>
+                        {r.recommended && (
+                          <span className="rounded-md bg-accent px-2 py-0.5 text-[0.72rem] font-bold text-night">
+                            RECOMMENDED
+                          </span>
+                        )}
+                        {r.dominated && (
+                          <span className="rounded-md bg-bad/20 text-bad border border-bad/40 px-2 py-0.5 text-[0.72rem] font-bold">
+                            PARETO DOMINATED
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-mono font-bold text-accent">
+                        Score: {r.score.toFixed(3)}
+                      </span>
+                    </div>
+
+                    <p className="mt-1 text-[0.8rem] text-soft italic">"{r.why}"</p>
+
+                    <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[0.78rem] text-soft border-t border-edge/60 pt-2">
+                      <div>
+                        Safety (wt 0.40): <span className="text-ink font-mono">[{Math.round(r.metrics.safety.lo * 100)}%, {Math.round(r.metrics.safety.hi * 100)}%]</span> (sub-score: {r.score_breakdown?.worst_case_safety?.toFixed(2) ?? "N/A"})
+                      </div>
+                      <div>
+                        Deadline Slack (wt 0.25): <span className="text-ink font-mono">{r.metrics.slack_min}m</span> (sub-score: {r.score_breakdown?.deadline_slack?.toFixed(2) ?? "N/A"})
+                      </div>
+                      <div>
+                        Outdoor Exposure (wt 0.15): <span className="text-ink font-mono">{r.metrics.outdoor_min}m</span> (sub-score: {r.score_breakdown?.outdoor_exposure?.toFixed(2) ?? "N/A"})
+                      </div>
+                      <div>
+                        Unlit Share (wt 0.10): <span className="text-ink font-mono">{Math.round(r.metrics.unknown_lighting_share * 100)}%</span> (sub-score: {r.score_breakdown?.unknown_share?.toFixed(2) ?? "N/A"})
+                      </div>
+                      <div className="col-span-2">
+                        Safe Haven Proximity (wt 0.10): <span className="text-ink font-mono">{r.metrics.safe_haven_dist_m}m</span> (sub-score: {r.score_breakdown?.safe_haven_proximity?.toFixed(2) ?? "N/A"})
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
-          <div className="mt-2">
-            <Act label="Safety timer: ask now" onClick={() => act(async () => {
-              if (!(await fireTimerSoon())) throw new Error("no timer: switch on “Tell my contact if I’m late”, then Start");
-            }, "Asking “Are you home?” now; alert in 20 s if no answer")} />
-          </div>
-        </Section>
-
-        <Section id="ble" title="9. Real Bluetooth (MESH_REAL)">
-          <BleSection />
-        </Section>
-
-        <Section id="gps" title="10. Location (simulated)">
-          <FakeGpsSection view={view} />
-        </Section>
-
-        <Section id="here" title="11. HERE online extras (tiles, traffic, transit check)">
-          <HereSection view={view} />
         </Section>
       </div>
     </div>

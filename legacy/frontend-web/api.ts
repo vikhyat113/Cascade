@@ -20,6 +20,7 @@ export const api = {
       prefs: { risk_weight: 1.0, modes: ["walk", "bus", "cab"], max_walk_m: 2500 },
     }),
   getPlan: (id: string, lang: Lang) => req<SimpleView>(`/api/plan/${id}?lang=${lang}`),
+  planRoutes: (id: string) => req<import("./types").PlanRoutesResponse>(`/api/plan/${id}/routes`),
   choose: (id: string, planId: string, lang: Lang) => post<SimpleView>(`/api/plan/${id}/choose`, { plan_id: planId, lang }),
   drop: (id: string) => req(`/api/plan/${id}`, { method: "DELETE" }).catch(() => {}),
   where: (lat: number, lon: number, lang: Lang) => req<{ name: string }>(`/api/where?lat=${lat}&lon=${lon}&lang=${lang}`),
@@ -29,4 +30,29 @@ export const api = {
   sos: (at: Place, lang: Lang) => post<{ hospital: PlaceOnWay | null; police: PlaceOnWay | null }>("/api/sos", { lat: at.lat, lon: at.lon, lang }),
   share: (id: string) => post<{ url: string }>("/api/share", { plan_id: id }),
   streetsMain: () => req<GeoJSON.FeatureCollection>("/api/map/streets?main=1"),
+  streetsAll: () => req<GeoJSON.FeatureCollection>("/api/map/streets"),
+  areaDiagnostics: () => req<import("./types").AreaDiagnostics>("/api/area/diagnostics"),
+  layers: () => req<import("./types").LayerMeta[]>("/api/layers"),
+  layerData: (id: string, hour?: number) =>
+    req<GeoJSON.FeatureCollection>(`/api/layers/${id}${hour !== undefined ? `?hour=${hour}` : ""}`),
+  weatherLayer: (varName: string = "apparent_temperature", hour?: number, lat?: number, lon?: number) => {
+    const q = new URLSearchParams({ var: varName });
+    if (hour !== undefined) q.set("hour", String(hour));
+    if (lat !== undefined) q.set("lat", String(lat));
+    if (lon !== undefined) q.set("lon", String(lon));
+    return req<GeoJSON.FeatureCollection & { origin_forecast?: import("./types").OriginForecastPoint[]; metadata?: any }>(`/api/layers/weather?${q.toString()}`);
+  },
+  thermalLayer: (source: string = "night_surface", hour?: number, lat?: number, lon?: number) => {
+    const q = new URLSearchParams({ source });
+    if (hour !== undefined) q.set("hour", String(hour));
+    if (lat !== undefined) q.set("lat", String(lat));
+    if (lon !== undefined) q.set("lon", String(lon));
+    return req<GeoJSON.FeatureCollection & { origin_forecast?: import("./types").OriginForecastPoint[]; metadata?: any }>(`/api/layers/thermal?${q.toString()}`);
+  },
+  nightLightsLayer: () =>
+    req<GeoJSON.FeatureCollection & { metadata?: any }>("/api/layers/night_lights"),
+  refreshLayer: (layer: string) =>
+    post<{ ok: boolean; status_chip?: string; age_s?: number; message?: string }>("/api/layers/refresh", { layer }),
+  mapPois: (time?: string) =>
+    req<GeoJSON.FeatureCollection>(`/api/map/pois${time ? `?time=${encodeURIComponent(time)}` : ""}`),
 };

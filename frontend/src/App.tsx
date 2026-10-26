@@ -1,33 +1,21 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CONFIG } from "./config";
+import { api } from "./api";
 import { useT, type CopyKey } from "./copy";
-import type { TripAsk } from "./engine/worker";
-import { MapCanvas, type MapLayers } from "./components/MapCanvas";
-import { LAYER_DEFAULT, loadLayerState, loadViirs, loadWeatherGrid, saveLayerState, viirsImage, type LayerId, type LayerState } from "./lib/layers";
-import { LayersButton, LayersSheet } from "./screens/Layers";
-import { OtherWays, WAY_COLORS } from "./screens/OtherWays";
-import { THEME } from "./theme";
-import { SosButton } from "./components/SosButton";
-import { BackButton, Banner, DeviationBanner, Pill } from "./components/ui";
-import { Chevron } from "./components/icons";
-import { setDemoActive } from "./lib/demoFlag";
-import { DeviationMonitor } from "./engine/deviation";
-import { fakeGps, useFakeGps, usePosition } from "./lib/position";
-import { call, listen } from "./lib/engine";
-import { useHereTraffic } from "./lib/here";
-import { useLive } from "./lib/live";
-import { freshFix, lastTrip, loadFlag, loadLastFix, loadPlace, myLocation, rememberTrip, saveFlag, saveLastFix, savePlace } from "./lib/saved";
-import { alertContact, mapLink, restoreRealBluetooth, smsHref } from "./sos";
-import { armTimer, disarmTimer, loadTimer, onTimerTapped, saveTimer, timerTimes } from "./sos/safetyTimer";
+import { MapCanvas } from "./components/MapCanvas";
+import { LayerPanel, type LayerState, type FacilityCounts } from "./components/LayerPanel";
+import { BackButton, Banner, Pill } from "./components/ui";
+import { Icon } from "./components/Icon";
+import { useConnection } from "./lib/connection";
+import { isInsideCoverage, lastTrip, loadPlace, myLocation, rememberTrip, savePlace } from "./lib/saved";
 import { Home, NEEDS } from "./screens/Home";
 import { OpenNow } from "./screens/OpenNow";
 import { Result } from "./screens/Result";
 import { Search } from "./screens/Search";
-import { HelpSheet, SafetySheet } from "./screens/Help";
-import { Trip } from "./screens/Trip";
-import type { AppConfig, LatLon, Place, PlaceOnWay, SimpleView } from "./types";
+import { HelpSheet, Trip } from "./screens/Trip";
+import { RouteSheet } from "./components/RouteSheet";
+import type { AppConfig, AreaDiagnostics, LatLon, LayerMeta, Place, PlaceOnWay, RouteItem, SimpleView } from "./types";
 
-// Judges only: code-split, never in the first download (spec §11).
+// Judges only: code-split, never in the first download (UI_SPEC §1.9, §5).
 const DemoDrawer = lazy(() => import("./demo/DemoDrawer"));
 const ScenariosPage = lazy(() => import("./demo/ScenariosPage"));
 const SHOW_DEMO = import.meta.env.VITE_SHOW_DEMO === "true";
@@ -42,37 +30,72 @@ export default function App() {
   return <Main />;
 }
 
-/** Bottom info bar shown during map-pick mode, with collapse/expand toggle. */
-function PickBar({ onBack, label }: { onBack: () => void; label: string }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="fixed inset-x-0 bottom-6 z-20 flex justify-center px-3">
-      <div className="flex w-full max-w-[480px] flex-col rounded-3xl bg-surface shadow-xl overflow-hidden">
-        {/* toggle strip */}
-        <button
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          aria-label={open ? "Collapse bar" : "Expand bar"}
-          className="flex h-8 w-full items-center justify-center gap-1 border-b border-edge/40 text-[0.85rem] font-semibold text-soft hover:text-ink transition-colors"
-        >
-          <Chevron dir={open ? "down" : "up"} />
-          <span>{open ? "Hide" : "Show instructions"}</span>
-        </button>
-        {/* collapsible content */}
-        {open && (
-          <div className="flex items-center gap-2 px-3 py-3">
-            <BackButton onClick={onBack} />
-            <p className="text-[1.15rem] font-semibold">{label}</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+function getSavedViewMode(layer: string, fallback: "streets" | "smooth" | "cells"): "streets" | "smooth" | "cells" {
+  try {
+    const val = localStorage.getItem(`nw_view_mode_${layer}`);
+    if (val === "streets" || val === "smooth" || val === "cells") return val;
+  } catch {}
+  return fallback;
+}
+
+function getSavedOpacity(layer: string, fallback: number): number {
+  try {
+    const val = localStorage.getItem(`nw_opacity_${layer}`);
+    if (val !== null) {
+      const num = parseFloat(val);
+      if (!isNaN(num) && num >= 0.1 && num <= 1.0) return num;
+    }
+  } catch {}
+  return fallback;
 }
 
 function Main() {
   const { t, lang } = useT();
   const [cfg, setCfg] = useState<AppConfig | null>(null);
+  const [diagnostics, setDiagnostics] = useState<AreaDiagnostics | null>(null);
+  const [showCoverage, setShowCoverage] = useState(true);
+  const [showDataCoverage, setShowDataCoverage] = useState(false);
+  const [layersMeta, setLayersMeta] = useState<LayerMeta[]>([]);
+  const [layerVersion, setLayerVersion] = useState(0);
+  const [facilityCounts, setFacilityCounts] = useState<FacilityCounts>({
+    medicine: 0,
+    food: 0,
+    hospital: 0,
+    police: 0,
+  });
+  const [layerState, setLayerState] = useState<LayerState>({
+    showCoverage: true,
+    facilities: {
+      medicine: false,
+      food: false,
+      hospital: false,
+      police: false,
+      openOnly: false,
+      includeUnknown: true,
+    },
+    viirs: {
+      enabled: false,
+      opacity: getSavedOpacity("viirs", 0.75),
+      mode: getSavedViewMode("viirs", "streets"),
+      live: false,
+    },
+    thermal: {
+      enabled: false,
+      opacity: getSavedOpacity("thermal", 0.75),
+      source: "night_surface",
+      mode: getSavedViewMode("thermal", "cells"),
+      hour: 2,
+      followClock: true,
+    },
+    weather: {
+      enabled: false,
+      opacity: getSavedOpacity("weather", 0.75),
+      mode: getSavedViewMode("weather", "cells"),
+      hour: 2,
+      followClock: true,
+      live: false,
+    },
+  });
   const [from, setFrom] = useState<Place | null>(null);
   const [to, setTo] = useState<Place | null>(null);
   const [home, setHome] = useState<Place | null>(null);
@@ -89,158 +112,93 @@ function Main() {
   const [error, setError] = useState<string | null>(null);
   const [need, setNeed] = useState<{ type: string; title: string; places: PlaceOnWay[] | null; empty: string | null } | null>(null);
   const [showPlaces, setShowPlaces] = useState(false);
-  const [help, setHelp] = useState<{ at: Place | null; fresh: boolean } | null>(null);
-  const lastFix = useRef<Place | null>(null);
-  useEffect(() => { loadLastFix().then((p) => { if (p && !lastFix.current) lastFix.current = { ...p, name: "" }; }); }, []);
+  const [helpAt, setHelpAt] = useState<Place | null>(null);
   const [sheetH, setSheetH] = useState(380);
   const [bannerId, setBannerId] = useState<string | null>(null);
   const [demoOpen, setDemoOpen] = useState(false);
-  const [lateAlert, setLateAlertState] = useState(false);
-  const [safety, setSafety] = useState<"ask" | "late" | null>(null);
-  const [dev, setDev] = useState<"ok" | "off" | "far">("ok");
-  const [askOk, setAskOk] = useState(false);
-  const [note, setNote] = useState<{ id: string; text: string } | null>(null);   // the app's own one-line banner
-  const [appNow, setAppNow] = useState(Date.now());
-  const devMon = useRef(new DeviationMonitor());
-  const fixRef = useRef<{ lat: number; lon: number } | null>(null);
-  const fakeOn = useFakeGps();
-  // ---- map layers (UPGRADE §3) ----
-  const [layerState, setLayerState] = useState<LayerState>(LAYER_DEFAULT);
-  const [layersOpen, setLayersOpen] = useState(false);
-  const [waysOpen, setWaysOpen] = useState(false);
-  const [layerData, setLayerData] = useState<MapLayers>({});
-  const [layerMissing, setLayerMissing] = useState<Partial<Record<LayerId, boolean>>>({});
-  const [layerMeta, setLayerMeta] = useState<{ night: string | null; weather: string | null }>({ night: null, weather: null });
-  useEffect(() => { loadLayerState().then(setLayerState); }, []);
-  const setLayers = (s: LayerState) => { setLayerState(s); saveLayerState(s); };
-  useEffect(() => { setDemoActive(fakeOn || Math.abs(appNow - Date.now()) > 120000); }, [fakeOn, appNow]);
+  const [routes, setRoutes] = useState<RouteItem[]>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
+  const [showDominatedRoutes] = useState(false);
   const seen = useRef(new Set<string>());
-  const ask = useRef<TripAsk | null>(null);
-  const conn = useLive(cfg?.center ?? null);
-  useHereTraffic(cfg?.bbox ?? null);
+  const conn = useConnection(view?.connection ?? null);
 
-  // ---- boot: the engine loads the bundled city; a trip this phone already started carries on ----------
+  useEffect(() => {
+    setShowCoverage(layerState.showCoverage);
+  }, [layerState.showCoverage]);
+
+  // ---- multi-route alternatives for active plan ------------------------------------------------
+  useEffect(() => {
+    if (!view?.id) {
+      setRoutes([]);
+      setSelectedRouteId(null);
+      return;
+    }
+    api.planRoutes(view.id)
+      .then((res) => {
+        setRoutes(res.routes || []);
+        const rec = res.routes?.find((r) => r.recommended);
+        if (rec) setSelectedRouteId((curr) => curr || rec.id);
+      })
+      .catch(() => {});
+  }, [view?.id]);
+
+  // ---- boot --------------------------------------------------------------------------------
   useEffect(() => {
     let stop = false;
-    (async () => {
-      try {
-        const c = await call("init");
-        if (stop) return;
-        setCfg(c);
-        setHome(await loadPlace("home", c.ui_defaults));
-        setWork(await loadPlace("work", c.ui_defaults));
-        setBy(c.ui_defaults.deadline);
-        setFrom(await myLocation(c.ui_defaults));
-        setLateAlertState(await loadFlag("lateAlert"));
-        restoreRealBluetooth({ title: t("label.appName"), text: t("line.meshOn") }).catch(() => {});
-        const saved = await lastTrip();
-        if (!saved || stop) return;
-        let v = await call("plan", saved.ask);
-        if (!v?.options.length) { rememberTrip(null); return; }
-        ask.current = saved.ask;
-        const opt = v.options.find((o) => o.id === saved.option);
-        if (saved.started && opt) v = (await call("choose", opt.plan_id)) ?? v;
-        if (v.banner) seen.current.add(v.banner.id);
-        setFrom({ ...saved.ask.from, kind: saved.ask.from.kind ?? null });
-        setTo({ ...saved.ask.to, kind: saved.ask.to.kind ?? null });
-        setWhen(saved.ask.when);
-        setBy(saved.ask.by);
-        setView(v);
-        setShownId(v.current_option_id || saved.option);
-        setScreen(saved.started ? "trip" : "result");
-      } catch {
-        if (!stop) setError(t("line.noWay"));
+    const boot = () => api.config().then(async (c) => {
+      if (stop) return;
+      setCfg(c);
+      setHome(loadPlace("home", c.ui_defaults));
+      setWork(loadPlace("work", c.ui_defaults));
+      setBy(c.ui_defaults.deadline);
+      setFrom(await myLocation(c.ui_defaults, c.center, c.radius_m, c.polygon));
+      api.areaDiagnostics().then((diag) => { if (!stop) setDiagnostics(diag); }).catch(() => {});
+      api.layers().then((res) => { if (!stop) setLayersMeta(res); }).catch(() => {});
+      // a shared link, or a trip this phone already started: carry on with it (from cache if no signal)
+      const trip = new URLSearchParams(window.location.search).get("trip") || lastTrip();
+      if (trip) {
+        api.getPlan(trip, lang).then((v) => {
+          if ((v as unknown as { offline?: boolean }).offline || !v.options) return;
+          setView(v);
+          setShownId(v.current_option_id || "safest");
+          setScreen("trip");
+        }).catch(() => rememberTrip(null));
       }
-    })();
+    }).catch(() => { if (!stop) { setError(t("line.noSignal")); window.setTimeout(boot, 3000); } });
+    boot();
     return () => { stop = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- live updates: the engine pushes a fresh view on every tick; words follow the language ----------
-  useEffect(() => listen((m) => { if (m.type === "view") setView(m.view); else setAppNow(m.now); }), []);
-  useEffect(() => { call("setLang", lang).catch(() => {}); }, [lang]);
-
-  // ---- safety timer: ask "Are you home?", then alert the contact if there is no answer ----------------
-  const here = (): Place | null => (fixRef.current ? { lat: fixRef.current.lat, lon: fixRef.current.lon, name: "" }
-    : view?.trip?.position ? { lat: view.trip.position[0], lon: view.trip.position[1], name: "" } : from);
-  const hereRef = useRef(here);
-  hereRef.current = here;
+  // ---- live updates: SSE, falling back to polling -----------------------------------------------
   useEffect(() => {
-    const check = async () => {
-      const tm = await loadTimer();
-      if (!tm || tm.answered) return;
-      const now = Date.now();
-      if (now >= tm.alertAt && !tm.alerted) {
-        const at = hereRef.current() ?? { lat: tm.lat, lon: tm.lon };
-        await saveTimer({ ...tm, alerted: true });
-        alertContact(at).catch(() => {});
-        setSafety("late");
-      } else if (now >= tm.askAt) {
-        setSafety((s) => s ?? (tm.alerted ? "late" : "ask"));
-      }
+    if (!view?.id) return;
+    const id = view.id;
+    let poll: number | undefined;
+    api.getPlan(id, lang).then(setView).catch(() => {});        // re-word immediately on language change
+    const es = new EventSource(`/api/plan/${id}/stream?lang=${lang}`);
+    es.addEventListener("plan_update", (e) => setView(JSON.parse((e as MessageEvent).data)));
+    es.onerror = () => {
+      es.close();
+      if (!poll) poll = window.setInterval(() => api.getPlan(id, lang).then(setView).catch(() => {}), 4000);
     };
-    check();
-    const id = window.setInterval(check, CONFIG.safetyTimer.checkMs);
-    const off = onTimerTapped(() => { check(); });
-    return () => { window.clearInterval(id); off(); };
+    return () => { es.close(); if (poll) window.clearInterval(poll); };
+  }, [view?.id, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- live layer updates: SSE -------------------------------------------------------------
+  useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource("/api/layers/stream");
+      es.addEventListener("layer_update", () => {
+        api.layers().then(setLayersMeta).catch(() => {});
+        setLayerVersion((v) => v + 1);
+      });
+    } catch {}
+    return () => {
+      es?.close();
+    };
   }, []);
-  const setLateAlert = (on: boolean) => { setLateAlertState(on); saveFlag("lateAlert", on); };
-  const imHome = () => { disarmTimer(); setSafety(null); };
-  const safetyHelp = async () => {
-    const tm = await loadTimer();
-    if (tm) await saveTimer({ ...tm, answered: true });
-    setSafety(null);
-    openHelp();
-  };
-
-  /** SOS: open Help at once with the place we have, then try for a fresh GPS fix. A fix outside the
-   *  area means demo mode (the app's place is simulated), so the app's place is kept. */
-  const openHelp = () => {
-    setHelp({ at: here() ?? lastFix.current, fresh: false });
-    freshFix().then(async (p) => {
-      if (!p) return;
-      saveLastFix(p);
-      lastFix.current = { ...p, name: "" };
-      const inside = await call("inArea", p.lat, p.lon).catch(() => false);
-      if (inside || !here()) setHelp((h) => (h ? { at: { ...p, name: "" }, fresh: true } : h));
-    });
-  };
-
-  // ---- map layers: each loads when switched on; heat and help places follow the app clock ----
-  const appHour = cfg ? new Date(appNow + (cfg.tz_offset_min ?? 330) * 60000).getUTCHours() : 0;
-  const appQuarter = Math.floor(appNow / 900000);
-  const on = layerState.on;
-  useEffect(() => {
-    if (!on.lit) { setLayerData((d) => ({ ...d, lit: null })); return; }
-    call("litStreets").then((r) => setLayerData((d) => ({ ...d, lit: { lit: r.lit, dark: r.dark } }))).catch(() => setLayerMissing((m) => ({ ...m, lit: true })));
-  }, [on.lit]);
-  useEffect(() => {
-    if (!on.heat) { setLayerData((d) => ({ ...d, heat: null })); return; }
-    call("heat", layerState.heatHour ?? appHour).then((r) => setLayerData((d) => ({ ...d, heat: { cells: r.cells, strength: layerState.strength.heat } }))).catch(() => {});
-  }, [on.heat, layerState.heatHour, layerState.strength.heat, layerState.heatHour === null ? appHour : 0]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!on.help) { setLayerData((d) => ({ ...d, help: null })); return; }
-    call("helpPlaces", layerState.helpNotSure, layerState.helpOpenOnly).then((r) => setLayerData((d) => ({ ...d, help: r }))).catch(() => {});
-  }, [on.help, layerState.helpNotSure, layerState.helpOpenOnly, appQuarter]);
-  useEffect(() => {
-    if (!on.weather || !cfg) { setLayerData((d) => ({ ...d, weather: null })); return; }
-    loadWeatherGrid().then((g) => {
-      const key = new Date(appNow + (cfg.tz_offset_min ?? 330) * 60000).toISOString().slice(0, 13) + ":00";
-      const k = g ? g.time.indexOf(key) : -1;
-      if (!g || k < 0) { setLayerMissing((m) => ({ ...m, weather: true })); setLayerData((d) => ({ ...d, weather: null })); return; }
-      setLayerMissing((m) => ({ ...m, weather: false }));
-      setLayerMeta((x) => ({ ...x, weather: g.fetched_at.slice(0, 10) }));
-      setLayerData((d) => ({ ...d, weather: g.points.map((p) => ({ lat: p.lat, lon: p.lon, temp: p.temp[k], rain: p.rain_prob[k] })) }));
-    });
-  }, [on.weather, appHour, cfg]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!on.night || !cfg) { setLayerData((d) => ({ ...d, night: null })); return; }
-    loadViirs(cfg.bbox).then((v) => {
-      if (!v) { setLayerMissing((m) => ({ ...m, night: true })); return; }
-      const hex = THEME.color.warn, rgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
-      setLayerMeta((x) => ({ ...x, night: `${v.nights[v.nights.length - 1]} … ${v.nights[0]}` }));
-      setLayerData((d) => ({ ...d, night: { url: viirsImage(v, rgb), bounds: [[v.bbox.south, v.bbox.west], [v.bbox.north, v.bbox.east]], strength: layerState.strength.night } }));
-    });
-  }, [on.night, layerState.strength.night, cfg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- one banner at a time, each shown once ---------------------------------------------------
   useEffect(() => {
@@ -257,115 +215,95 @@ function Main() {
   const shown = options.find((o) => o.id === shownId) ?? options.find((o) => o.tab) ?? null;
   const current = options.find((o) => o.id === view?.current_option_id) ?? shown;
 
-  // ---- deviation warning (UPGRADE §7): real GPS when the trip started from a real fix, else the Demo's fake GPS ----
-  const onTrip = screen === "trip" && !!current && !view?.trip?.arrived;
-  const realStart = !!from && from.kind === "here" && !from.demo;
-  const fix = usePosition(onTrip, realStart);
-  fixRef.current = fix;
-  useEffect(() => {
-    if (!fix || !onTrip || !current || !cfg) return;
-    const vehicle = view?.trip?.next_icon === "bus" || view?.trip?.next_icon === "metro";
-    const hour = new Date(appNow + (cfg.tz_offset_min ?? 330) * 60000).getUTCHours();
-    const [a, b] = cfg.night_hours ?? [19, 6];
-    const st = devMon.current.update(fix, current.path, vehicle, hour >= a || hour < b);
-    setDev(devMon.current.shown(Date.now()));
-    if (st.still) setAskOk(true);
-  }, [fix]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (!onTrip) { devMon.current.reset(); setDev("ok"); } }, [onTrip]);
-
-  /** "New way": plan again from where the phone is now, same destination and "Be there by". */
-  const newWayFromHere = async () => {
-    const at = fix ?? (view?.trip?.position ? { lat: view.trip.position[0], lon: view.trip.position[1] } : null);
-    if (!at || !ask.current) return;
-    const a: TripAsk = { ...ask.current, from: { lat: at.lat, lon: at.lon, name: "", kind: null }, when: null };
-    const v = await call("plan", a).catch(() => null);
-    if (!v?.options.length) return;
-    const opt = v.options.find((o) => o.id === shownId) ?? v.options.find((o) => o.tab) ?? v.options[0];
-    const v2 = (await call("choose", opt.plan_id).catch(() => null)) ?? v;
-    ask.current = a;
-    rememberTrip({ ask: a, option: opt.id, started: true });
-    setView(v2);
-    setShownId(v2.current_option_id || opt.id);
-    devMon.current.reset();
-    setDev("ok");
-    const now = v2.options.find((o) => o.id === (v2.current_option_id || opt.id));
-    if (now && fakeGps.running()) fakeGps.follow(now.path);
-    setNote({ id: `nw-${Date.now()}`, text: t("line.newWayFromHere") });
-  };
-
-
   // ---- actions ----------------------------------------------------------------------------------
   const find = useCallback(async (dest: Place | null = to) => {
-    if (!from || !dest) return;
+    if (!from || !dest || !cfg) return;
+    if (!isInsideCoverage(from.lat, from.lon, cfg) || !isInsideCoverage(dest.lat, dest.lon, cfg)) {
+      setError(t("line.outsideArea"));
+      setScreen("home");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const a: TripAsk = { from, to: dest, when, by };
-      const v = await call("plan", a);
-      if (!v || !v.options.length) { setError(v?.error_text || t("line.noWay")); setScreen("home"); return; }
+      const v = await api.plan(from, dest, when, by, lang);
+      if (view?.id) api.drop(view.id);
       if (v.banner) seen.current.add(v.banner.id);
-      ask.current = a;
-      rememberTrip({ ask: a, option: "safest", started: false });
+      if (!v.options.length) { setError(v.error_text || t("line.noWay")); setScreen("home"); return; }
       setView(v);
       setShownId("safest");
       setShowPlaces(false);
       setScreen("result");
     } catch {
-      setError(t("line.noWay"));
+      const last = lastTrip();                                    // no server: keep going on saved info
+      if (last) {
+        try { const v = await api.getPlan(last, lang); setView(v); setScreen("trip"); return; } catch { /* nothing saved */ }
+      }
+      setError(navigator.onLine ? t("line.noWay") : t("line.noSignal"));
       setScreen("home");
     } finally {
       setBusy(false);
     }
-  }, [from, to, when, by, t]);
+  }, [from, to, when, by, lang, view?.id, cfg, t]);
 
   const start = async () => {
     if (!view || !shown) return;
     setStarting(true);
     try {
-      const v = await call("choose", shown.plan_id);
-      if (v) { setView(v); setShownId(v.current_option_id || shown.id); }
-      if (ask.current) rememberTrip({ ask: ask.current, option: v?.current_option_id || shown.id, started: true });
-      if (lateAlert && from) {
-        const tm = await call("timing");
-        if (tm.deadline) await armTimer({ ...timerTimes(tm.deadline, tm.now, tm.speed), lat: from.lat, lon: from.lon }, { title: t("line.areYouHome"), body: t("line.tapToAnswer") });
-      }
-    } catch { /* carry on with what we have */ }
+      const v = await api.choose(view.id, shown.plan_id, lang);
+      setView(v);
+      setShownId(v.current_option_id || shown.id);
+      rememberTrip(v.id);
+    } catch { /* offline: carry on with what we have */ }
     setStarting(false);
     setScreen("trip");
   };
 
   const endTrip = () => {
-    call("endTrip").catch(() => {});
-    disarmTimer();
-    setSafety(null);
+    if (view?.id) api.drop(view.id);
     rememberTrip(null);
-    ask.current = null;
     setView(null);
+    setRoutes([]);
+    setSelectedRouteId(null);
+    setShowCompare(false);
     setScreen("home");
   };
 
   const openNeed = async (type: string) => {
     if (!from) return;
-    const n = NEEDS.find((x) => x.type === type);
-    const base = { type, title: n ? t(n.key as CopyKey) : t("label.safePlaces"), places: null, empty: null };
+    setLayerState((prev) => ({
+      ...prev,
+      facilities: {
+        ...prev.facilities,
+        [type]: true,
+      },
+    }));
+    const n = NEEDS.find((x) => x.type === type)!;
+    const base = { type, title: t(n.key as CopyKey), places: null, empty: null };
     setNeed(base);
     setScreen("opennow");
     try {
-      const places = await call("needNow", type, from.lat, from.lon);
-      setNeed({ ...base, places, empty: places.length ? null : t("line.nothingOpen") });
+      const r = await api.needNow(type, from, lang);
+      setNeed({ ...base, places: r.places, empty: r.empty_text });
     } catch {
-      setNeed({ ...base, places: [], empty: t("line.nothingOpen") });
+      setNeed({ ...base, places: [], empty: t("line.noSignal") });
     }
   };
 
   const goTo = (p: PlaceOnWay) => {
     const dest: Place = { lat: p.lat, lon: p.lon, name: p.name, kind: null };
     setTo(dest);
-    setHelp(null);
+    setHelpAt(null);
     find(dest);
   };
 
   const choosePlace = (p: Place, save: "home" | "work" | null) => {
+    if (cfg && !isInsideCoverage(p.lat, p.lon, cfg)) {
+      setError(t("line.outsideArea"));
+      setScreen("home");
+      return;
+    }
+    setError(null);
     if (save) {
       savePlace(save, p);
       (save === "home" ? setHome : setWork)({ ...p, kind: save });
@@ -376,45 +314,54 @@ function Main() {
   };
 
   const quickPlace = (slot: Place | "home" | "work") => {
-    if (typeof slot !== "string") return setTo(slot);
+    if (typeof slot !== "string") {
+      if (cfg && !isInsideCoverage(slot.lat, slot.lon, cfg)) {
+        setError(t("line.outsideArea"));
+        return;
+      }
+      setError(null);
+      return setTo(slot);
+    }
     const p = slot === "home" ? home : work;
-    if (p) setTo({ ...p, kind: slot });
-    else { setField("to"); setScreen("search"); }
+    if (p) {
+      if (cfg && !isInsideCoverage(p.lat, p.lon, cfg)) {
+        setError(t("line.outsideArea"));
+        return;
+      }
+      setError(null);
+      setTo({ ...p, kind: slot });
+    } else {
+      setField("to");
+      setScreen("search");
+    }
   };
 
   const onBackup = (id: string) => {
-    if (id === "safe") { openNeed("safe"); return; }
     setShownId(id);
     setScreen("result");
   };
 
   // ---- map for each screen ---------------------------------------------------------------------
   const mapView = useMemo(() => {
-    if (screen === "result" && shown && waysOpen && view?.other_ways.length) {
-      const others = view.other_ways.map((w, i) => ({ path: options.find((o) => o.id === w.option_id)?.path ?? [], color: THEME.color[WAY_COLORS[i % WAY_COLORS.length]] }));
-      return { others, start: shown.start, end: shown.end, fitKey: `w-${view.id}` };
-    }
     if ((screen === "result") && shown) {
-      return { path: shown.path, start: shown.start, end: shown.end, changes: shown.changes, places: showPlaces ? shown.places : [],
+      return { path: shown.path, start: shown.start, end: shown.end, places: showPlaces ? shown.places : [],
                fitKey: `r-${view?.id}-${shown.id}-${showPlaces}` };
     }
     if (screen === "trip" && current) {
-      return { path: current.path, start: current.start, end: current.end, changes: current.changes, me: fix ? [fix.lat, fix.lon] as LatLon : view?.trip?.position ?? null,
+      return { path: current.path, start: current.start, end: current.end, me: view?.trip?.position ?? null,
                fitKey: `t-${view?.id}-${current.plan_id}` };
     }
     if (screen === "opennow") {
       return { places: need?.places ?? [], start: ll(from), fitKey: `n-${need?.type}-${need?.places?.length}` };
     }
     return { start: ll(from), end: ll(to), fitKey: `h-${from?.lat}-${to?.lat}` };
-  }, [screen, shown, current, showPlaces, waysOpen, view?.id, view?.other_ways, view?.trip?.position, fix, need, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [screen, shown, current, showPlaces, view?.id, view?.trip?.position, need, from, to]);
 
   if (!cfg) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center" role="status">
-      <span className="text-[2rem] font-bold text-accent" aria-hidden="true">NW</span>
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <Icon name="moon" size={48} className="text-lime opacity-60" />
         <p className="text-[1.2rem] font-semibold">{error || t("line.finding")}</p>
-        <SosButton onPress={openHelp} />
-        {help && <HelpSheet at={help.at} fresh={help.fresh} onClose={() => setHelp(null)} onGo={() => setHelp(null)} />}
       </div>
     );
   }
@@ -422,60 +369,187 @@ function Main() {
   const demo = { showDemo: SHOW_DEMO, onDemo: () => setDemoOpen(true) };
   return (
     <div className="relative h-full overflow-hidden">
-      <MapCanvas center={cfg.center} bbox={cfg.bbox} layers={layerData} bottomPad={sheetH} topPad={screen === "trip" ? 150 : 80} {...mapView}
+      <MapCanvas
+        center={cfg.center}
+        boundary={cfg.polygon}
+        bbox={cfg.bbox}
+        showCoverage={showCoverage}
+        showDataCoverage={showDataCoverage}
+        layerState={layerState}
+        from={from}
+        onTakeMeThere={(dest) => {
+          const target: Place = { lat: dest.lat, lon: dest.lon, name: dest.name, kind: null };
+          setTo(target);
+          find(target);
+        }}
+        onFacilityCounts={setFacilityCounts}
+        bottomPad={sheetH}
+        offline={conn === "offline"}
+        layerVersion={layerVersion}
+        routes={screen === "result" ? routes : undefined}
+        selectedRouteId={selectedRouteId ?? undefined}
+        onSelectRoute={(id) => {
+          setSelectedRouteId(id);
+          const opt = options.find((o) => o.id === id);
+          if (opt) setShownId(opt.id);
+        }}
+        showDominated={showDominatedRoutes}
+        {...mapView}
         onPick={screen === "pick" ? async (lat, lon) => {
-          const name = (await call("where", lat, lon).catch(() => null)) || t("label.pickedPoint");
+          if (cfg && !isInsideCoverage(lat, lon, cfg)) {
+            setError(t("line.outsideArea"));
+            return;
+          }
+          setError(null);
+          const name = await api.where(lat, lon, lang).then((r) => r.name).catch(() => t("label.pickedPoint"));
           choosePlace({ lat, lon, name }, field === "to" ? pickSave : null);
-        } : null} />
-      <Pill connection={conn} long={screen === "trip"} />
-      {onTrip && dev !== "ok" && !help && (
-        <DeviationBanner level={dev} onNewWay={newWayFromHere} onSos={openHelp}
-          onFine={() => { devMon.current.snooze(Date.now()); setDev("ok"); }}
-          sms={smsHref(t("fmt.smsOffWay", { link: fix ? mapLink(fix.lat, fix.lon) : "" }))} />
-      )}
-      {note && dev === "ok" && <Banner id={note.id} text={note.text} onDone={() => setNote(null)} />}
-      {banner && !note && dev === "ok" && <Banner id={banner.id} text={banner.text} onDone={() => setBannerId(null)}
+        } : null}
+      />
+
+      <LayerPanel
+        layersMeta={layersMeta}
+        state={layerState}
+        onChange={setLayerState}
+        counts={facilityCounts}
+        simHour={2}
+        originLat={from?.lat ?? cfg.center.lat}
+        originLon={from?.lon ?? cfg.center.lon}
+        onRefreshMeta={() => {
+          api.layers().then(setLayersMeta).catch(() => {});
+          setLayerVersion((v) => v + 1);
+        }}
+      />
+
+      {/* Coverage legend toggle & Area label pill */}
+      <div className="fixed left-3 top-3 z-30 flex flex-col items-start gap-1.5 pointer-events-auto">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => {
+              const next = !showCoverage;
+              setShowCoverage(next);
+              setLayerState((s) => ({ ...s, showCoverage: next }));
+            }}
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[0.82rem] font-semibold shadow-md backdrop-blur-md transition-colors ${
+              showCoverage
+                ? "border-accent/60 bg-surface/90 text-accent"
+                : "border-edge bg-surface/75 text-soft hover:text-ink"
+            }`}
+            aria-pressed={showCoverage}
+            title={t("label.showCoverage")}
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: showCoverage ? "#8b7cff" : "#64748b" }}
+              aria-hidden="true"
+            />
+            {t("label.showCoverage")}
+          </button>
+          <button
+            onClick={() => setShowDataCoverage((v) => !v)}
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.82rem] font-semibold shadow-md backdrop-blur-md transition-colors ${
+              showDataCoverage
+                ? "border-good/60 bg-surface/90 text-good"
+                : "border-edge bg-surface/75 text-soft hover:text-ink"
+            }`}
+            aria-pressed={showDataCoverage}
+            title="Data coverage"
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: showDataCoverage ? "#34d399" : "#64748b" }}
+              aria-hidden="true"
+            />
+            Data
+          </button>
+        </div>
+        {showCoverage && (
+          <div className="rounded-full border border-edge bg-surface/90 px-3 py-0.5 text-[0.76rem] font-medium text-ink shadow backdrop-blur-md">
+            {t("fmt.coverageArea", {
+              area: String(cfg.area_km2 || diagnostics?.area_km2 || 49),
+              streets: String(diagnostics?.walk_edges || cfg.vertex_count || 8020),
+            })}
+          </div>
+        )}
+      </div>
+
+      <Pill connection={conn} />
+      {banner && <Banner id={banner.id} text={banner.text} onDone={() => setBannerId(null)}
         onSee={() => { if (banner.see_option_id) setShownId(banner.see_option_id); }} />}
 
       {screen === "home" && (
         <Home from={from} to={to} home={home} work={work} when={when} by={by} busy={busy} error={error}
-          onFrom={() => { setField("from"); setScreen("search"); }} onTo={() => { setField("to"); setScreen("search"); }}
+          onFrom={() => { setError(null); setField("from"); setScreen("search"); }}
+          onTo={() => { setError(null); setField("to"); setScreen("search"); }}
           onPlace={quickPlace} onWhen={setWhen} onBy={setBy} onFind={() => find()} onNeed={openNeed} onHeight={setSheetH} {...demo} />
       )}
       {screen === "search" && (
-        <Search field={field} onBack={() => setScreen("home")} onChoose={choosePlace} onHeight={setSheetH}
-          onPickMap={(save) => { setPickSave(save); setScreen("pick"); }} />
+        <Search field={field} onBack={() => { setError(null); setScreen("home"); }} onChoose={choosePlace} onHeight={setSheetH}
+          onPickMap={(save) => { setError(null); setPickSave(save); setScreen("pick"); }} />
       )}
       {screen === "pick" && (
-        <PickBar onBack={() => setScreen("search")} label={t("line.tapMap")} />
+        <div className="fixed inset-x-0 bottom-6 z-20 flex flex-col items-center gap-2 px-3">
+          {error && (
+            <div className="rounded-2xl bg-warn px-4 py-2.5 text-[1rem] font-bold text-night shadow-xl" role="alert">
+              {error}
+            </div>
+          )}
+          <div className="flex w-full max-w-[480px] items-center gap-2 rounded-3xl bg-surface px-3 py-3 shadow-xl">
+            <BackButton onClick={() => { setError(null); setScreen("search"); }} />
+            <p className="text-[1.15rem] font-semibold">{t("line.tapMap")}</p>
+          </div>
+        </div>
       )}
       {screen === "result" && shown && (
-        <Result options={options} shown={shown} onTab={setShownId} onBackup={onBackup} onStart={start} starting={starting} lateAlert={lateAlert} setLateAlert={setLateAlert}
-          onOtherWays={view?.other_ways.length ? () => setWaysOpen(true) : null}
-          onBack={() => setScreen("home")} showPlaces={showPlaces} setShowPlaces={setShowPlaces} onHeight={setSheetH} {...demo} />
+        <Result
+          options={options}
+          shown={shown}
+          onTab={(id) => {
+            setShownId(id);
+            setSelectedRouteId(id);
+          }}
+          onBackup={onBackup}
+          onStart={start}
+          starting={starting}
+          onBack={() => setScreen("home")}
+          showPlaces={showPlaces}
+          setShowPlaces={setShowPlaces}
+          onHeight={setSheetH}
+          onCompare={() => setShowCompare(true)}
+          {...demo}
+        />
+      )}
+      {showCompare && view && routes.length > 0 && (
+        <RouteSheet
+          routes={routes}
+          selectedId={selectedRouteId}
+          onSelect={(id: string) => {
+            setSelectedRouteId(id);
+            const opt = options.find((o) => o.id === id);
+            if (opt) setShownId(opt.id);
+          }}
+          onStart={start}
+          starting={starting}
+          onClose={() => setShowCompare(false)}
+          fromName={from?.name || t("label.myLocation")}
+          toName={to?.name || ""}
+          onSwap={() => {
+            const tmp = from;
+            setFrom(to);
+            setTo(tmp ?? null);
+          }}
+          tripProgressM={0}
+          tripStarted={false}
+        />
       )}
       {screen === "trip" && current && (
         <Trip option={current} trip={view?.trip ?? null} onEnd={endTrip} onBackup={onBackup} onHeight={setSheetH} {...demo}
-          onHelp={openHelp} />
+          onHelp={() => setHelpAt(view?.trip?.position ? { lat: view.trip.position[0], lon: view.trip.position[1], name: "" } : from)} />
       )}
       {screen === "opennow" && need && (
-        <OpenNow title={need.title} places={need.places} empty={need.empty} onBack={() => setScreen("home")}
-          onPick={goTo} onHeight={setSheetH} />
+        <OpenNow title={need.title} currentType={need.type} places={need.places} empty={need.empty} onBack={() => setScreen("home")}
+          onPick={goTo} onSwitchNeed={openNeed} onHeight={setSheetH} />
       )}
-      {waysOpen && screen === "result" && view?.other_ways.length ? (
-        <OtherWays ways={view.other_ways} closeText={view.close_text} colors={WAY_COLORS.map((c) => THEME.color[c])}
-          onPick={(id) => { setShownId(id); setWaysOpen(false); }} onClose={() => setWaysOpen(false)} />
-      ) : null}
-      {help && <HelpSheet at={help.at} fresh={help.fresh} onClose={() => setHelp(null)} onGo={goTo} />}
-      {safety && !help && from && <SafetySheet at={here() ?? from} late={safety === "late"} onHome={imHome} onHelp={safetyHelp} />}
-      {askOk && !safety && !help && from && <SafetySheet ok at={here() ?? from} late={false}
-        onHome={() => { devMon.current.okStill(Date.now()); setAskOk(false); }} onHelp={() => { setAskOk(false); openHelp(); }} />}
-      {screen !== "search" && screen !== "pick" && (
-        <LayersButton bottom={sheetH} onOpen={() => setLayersOpen(true)} active={Object.values(on).some(Boolean)} />
-      )}
-      {layersOpen && <LayersSheet state={layerState} onChange={setLayers} onClose={() => setLayersOpen(false)}
-        missing={layerMissing} nightDate={layerMeta.night} weatherTime={layerMeta.weather} />}
-      <SosButton onPress={openHelp} />
+      {helpAt && <HelpSheet at={helpAt} planId={view?.id ?? null} onClose={() => setHelpAt(null)} onGo={goTo} />}
 
       <Suspense fallback={null}>
         {demoOpen && <DemoDrawer view={view} onClose={() => setDemoOpen(false)} />}

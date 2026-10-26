@@ -1,57 +1,74 @@
-import { Geolocation } from "@capacitor/geolocation";
-import { Preferences } from "@capacitor/preferences";
-import type { Lang } from "../copy";
-import { call } from "./engine";
-import type { TripAsk } from "../engine/worker";
 import type { Place, UiDefaults } from "../types";
 
-// Saved on this phone with Capacitor Preferences: Home / Work, language and the last trip.
+// Home / Work are saved once on this phone (localStorage); defaults come from the demo config.
 type Slot = "home" | "work";
 
-async function read<T>(key: string): Promise<T | null> {
-  try { const { value } = await Preferences.get({ key }); return value ? (JSON.parse(value) as T) : null; } catch { return null; }
-}
-function write(key: string, v: unknown): void {
-  (v == null ? Preferences.remove({ key }) : Preferences.set({ key, value: JSON.stringify(v) })).catch(() => {});
-}
-
-export async function loadPlace(slot: Slot, defaults: UiDefaults | null): Promise<Place | null> {
-  const p = await read<Place>(`nw.${slot}`);
-  if (p) return { ...p, kind: slot };
+export function loadPlace(slot: Slot, defaults: UiDefaults | null): Place | null {
+  try {
+    const raw = localStorage.getItem(`nw.${slot}`);
+    if (raw) return { ...JSON.parse(raw), kind: slot };
+  } catch { /* private mode */ }
   const d = defaults?.[slot];
   return d ? { lat: d.lat, lon: d.lon, name: d.name, kind: slot } : null;
 }
-export function savePlace(slot: Slot, p: Place): void { write(`nw.${slot}`, { lat: p.lat, lon: p.lon, name: p.name }); }
 
-export async function loadFlag(key: string): Promise<boolean> { return (await read<boolean>(`nw.${key}`)) === true; }
-export function saveFlag(key: string, on: boolean): void { write(`nw.${key}`, on); }
-
-/** The last real GPS fix, for SOS while a new fix is slow ("Using last place"). */
-export const loadLastFix = () => read<{ lat: number; lon: number }>("nw.lastFix");
-export function saveLastFix(p: { lat: number; lon: number }): void { write("nw.lastFix", { lat: p.lat, lon: p.lon }); }
-
-/** A fresh GPS fix for SOS, or null within the time limit. */
-export async function freshFix(timeoutMs = 5000): Promise<{ lat: number; lon: number } | null> {
-  const fix = Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 20000 }).catch(() => null);
-  const pos = await Promise.race([fix, new Promise<null>((r) => window.setTimeout(() => r(null), timeoutMs + 500))]);
-  return pos ? { lat: pos.coords.latitude, lon: pos.coords.longitude } : null;
+export function savePlace(slot: Slot, p: Place): void {
+  try { localStorage.setItem(`nw.${slot}`, JSON.stringify({ lat: p.lat, lon: p.lon, name: p.name })); } catch { /* ignore */ }
 }
 
-export async function loadLang(): Promise<Lang> { return (await read<Lang>("nw.lang")) === "hi" ? "hi" : "en"; }
-export function saveLang(l: Lang): void { write("nw.lang", l); }
+export function lastTrip(): string | null {
+  try { return localStorage.getItem("nw.trip"); } catch { return null; }
+}
 
-/** The last plan: what was asked, which way was shown, and whether the trip had started. */
-export interface SavedTrip { ask: TripAsk; option: string; started: boolean }
-export const lastTrip = () => read<SavedTrip>("nw.trip");
-export function rememberTrip(t: SavedTrip | null): void { write("nw.trip", t); }
+export function rememberTrip(id: string | null): void {
+  try { if (id) localStorage.setItem("nw.trip", id); else localStorage.removeItem("nw.trip"); } catch { /* ignore */ }
+}
 
-/** "My location": the phone's GPS if it is inside (or near) a zone of the area, else the demo start point. */
-export async function myLocation(defaults: UiDefaults): Promise<Place> {
+export function pointInPolygon(lon: number, lat: number, poly: { coordinates: [number, number][][] }): boolean {
+  const ring = poly.coordinates[0];
+  if (!ring || ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = ((yi > lat) !== (yj > lat)) && (lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+export function isInsideCoverage(
+  lat: number,
+  lon: number,
+  cfg: { polygon?: { type: "Polygon"; coordinates: [number, number][][] } | null; center: { lat: number; lon: number }; radius_m: number }
+): boolean {
+  if (cfg.polygon && cfg.polygon.coordinates?.length) {
+    return pointInPolygon(lon, lat, cfg.polygon);
+  }
+  const dLat = (lat - cfg.center.lat) * 110540;
+  const dLon = (lon - cfg.center.lon) * 111320 * Math.cos((cfg.center.lat * Math.PI) / 180);
+  return Math.hypot(dLat, dLon) <= cfg.radius_m;
+}
+
+/** "My location": the phone's position if it is inside the demo city, else the demo start point. */
+export function myLocation(
+  defaults: UiDefaults,
+  center: { lat: number; lon: number },
+  radius: number,
+  polygon?: { type: "Polygon"; coordinates: [number, number][][] } | null
+): Promise<Place> {
   const demo: Place = { ...defaults.start, kind: "here", demo: true };
-  const fix = Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 4000, maximumAge: 60000 }).catch(() => null);
-  const pos = await Promise.race([fix, new Promise<null>((r) => window.setTimeout(() => r(null), 5000))]);
-  if (!pos) return demo;
-  const { latitude: lat, longitude: lon } = pos.coords;
-  saveLastFix({ lat, lon });
-  return (await call("inArea", lat, lon).catch(() => false)) ? { lat, lon, name: "", kind: "here" } : demo;
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(demo);
+    const timer = window.setTimeout(() => resolve(demo), 2500);
+    navigator.geolocation.getCurrentPosition((pos) => {
+      window.clearTimeout(timer);
+      const { latitude: lat, longitude: lon } = pos.coords;
+      const inside = polygon && polygon.coordinates?.length
+        ? pointInPolygon(lon, lat, polygon)
+        : Math.hypot((lat - center.lat) * 110540, (lon - center.lon) * 111320 * Math.cos((center.lat * Math.PI) / 180)) <= radius;
+      resolve(inside ? { lat, lon, name: "", kind: "here" } : demo);
+    }, () => { window.clearTimeout(timer); resolve(demo); }, { timeout: 2000, maximumAge: 60000 });
+  });
 }
+

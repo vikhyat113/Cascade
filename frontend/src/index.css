@@ -1,26 +1,41 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
+@import "@fontsource/manrope/400.css";
+@import "@fontsource/manrope/500.css";
+@import "@fontsource/manrope/600.css";
+@import "@fontsource/manrope/700.css";
+@import "@fontsource/manrope/800.css";
 
-/* Night theme (UI_SPEC §1.7): dark, high contrast, ONE accent colour.
-   Type: body 17px, key text 26px+, nothing smaller than 14px. Tap targets >= 48px.
-   Sizes are in rem so the phone's large-font setting scales everything. */
 @theme {
-  --color-night: #0a0f1e;
-  --color-surface: #131b31;
-  --color-raised: #1c2642;
-  --color-edge: #2c3860;
-  --color-ink: #f4f6ff;
-  --color-soft: #c3cae6;          /* secondary text, 9.6:1 on surface */
-  --color-accent: #8b7cff;        /* the one accent: buttons, route line */
-  --color-accent-ink: #0a0f1e;
-  --color-good: #34d399;
-  --color-warn: #fbbf24;
-  --color-bad: #f87171;
-  --color-help: #e5484d;
-  --color-me: #60a5fa;
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif;
-  --text-body: 1.0625rem;         /* 17px */
-  --text-key: 1.625rem;           /* 26px */
-  --text-huge: 2rem;              /* 32px */
+  --color-map-land:  #3B4C5C;
+  --color-map-road:  #6F8497;
+  --color-map-water: #243241;
+  --color-map-park:  #3D5247;
+  --color-card:        #E8EAEC;
+  --color-card-ink:    #1C2630;
+  --color-night:       #1A222C;
+  --color-surface:     #222D38;
+  --color-raised:      #2C3A47;
+  --color-edge:        #3A4D5E;
+  --color-ink:         #F3F6F8;
+  --color-soft:        #9FB0BF;
+  --color-muted:       #6B8199;
+  --color-lime:        #E4FF3C;
+  --color-lime-ink:    #121212;
+  --color-pill:        #0D0D0D;
+  --color-pill-ink:    #F3F6F8;
+  --color-good:        #34D399;
+  --color-warn:        #F59E0B;
+  --color-bad:         #F87171;
+  --color-help:        #E5484D;
+  --color-accent:      #E4FF3C;
+  --color-accent-ink:  #121212;
+  --radius-card:  28px;
+  --radius-pill:  999px;
+  --radius-input: 20px;
+  --font-sans: "Manrope", "Noto Sans Devanagari", "Nirmala UI", system-ui, -apple-system, sans-serif;
+  --text-body: 1.0625rem;
+  --text-key:  1.625rem;
+  --text-huge: 2rem;
 }
 
 html, body, #root { height: 100%; }
@@ -31,24 +46,68 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   font-size: var(--text-body);
-  line-height: 1.4;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
 }
 
-:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+:focus-visible { outline: 3px solid var(--color-lime); outline-offset: 2px; }
 
-/* Leaflet: dark base map by inverting the standard OSM tiles; keep controls quiet */
-.leaflet-container { background: #0b1222 !important; font-family: var(--font-sans); }
-.nw-tiles { filter: invert(100%) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.6); }
-.leaflet-control-attribution { font-size: 11px !important; background: rgba(10, 15, 30, 0.7) !important; color: #c3cae6 !important; }
-.leaflet-control-attribution a { color: #c3cae6 !important; }
+.leaflet-container {
+  background: var(--color-map-land) !important;
+  font-family: var(--font-sans);
+}
+.nw-tiles {
+  filter: saturate(0.55) hue-rotate(195deg) brightness(0.72) contrast(0.90);
+}
+.leaflet-control-attribution {
+  font-size: 10px !important;
+  background: rgba(26,34,44,0.80) !important;
+  color: var(--color-soft) !important;
+  border-radius: 4px 0 0 0;
+  padding: 2px 6px !important;
+}
+.leaflet-control-attribution a { color: var(--color-soft) !important; }
+.leaflet-control-zoom { display: none; }
 .leaflet-div-icon { background: transparent; border: none; }
 
-@keyframes nw-pulse { 0% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.7); } 100% { box-shadow: 0 0 0 14px rgba(96, 165, 250, 0); } }
-.nw-me { width: 18px; height: 18px; border-radius: 50%; background: #60a5fa; border: 3px solid #fff; animation: nw-pulse 2s infinite; }
-@media (prefers-reduced-motion: reduce) { .nw-me { animation: none; } * { transition: none !important; } }
+@keyframes nw-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(228,255,60,0.6); }
+  100% { box-shadow: 0 0 0 14px rgba(228,255,60,0); }
+}
+.nw-me {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--color-lime); border: 3px solid #fff;
+  animation: nw-pulse 2s infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nw-me { animation: none; }
+  * { transition: none !important; animation-duration: 0.01ms !important; }
+}
 
-.nw-sheet { box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55); }
+.nw-sheet { box-shadow: 0 -12px 48px rgba(0,0,0,0.65); }
+.nw-card-shadow { box-shadow: 0 4px 24px rgba(0,0,0,0.40); }
 .scroll-quiet { scrollbar-width: thin; scrollbar-color: var(--color-edge) transparent; }
+
+.nw-topo-pattern { position: relative; overflow: hidden; }
+.nw-topo-pattern::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cellipse cx='100' cy='100' rx='85' ry='55' fill='none' stroke='%231C2630' stroke-width='0.8' stroke-opacity='0.18'/%3E%3Cellipse cx='100' cy='100' rx='65' ry='38' fill='none' stroke='%231C2630' stroke-width='0.8' stroke-opacity='0.13'/%3E%3Cellipse cx='100' cy='100' rx='45' ry='24' fill='none' stroke='%231C2630' stroke-width='0.8' stroke-opacity='0.10'/%3E%3C/svg%3E");
+  background-size: 160px 100px; opacity: 0.5;
+}
+
+.chip-known   { background:#E4FF3C; color:#121212; border-radius:4px; padding:2px 7px; font-weight:700; font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; }
+.chip-probable{ background:#2C3A47; color:#9FB0BF; border-radius:4px; border:1px solid #3A4D5E; padding:2px 7px; font-weight:600; font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; }
+.chip-outdated{ background:rgba(245,158,11,0.13); color:#F59E0B; border-radius:4px; border:1px solid #F59E0B; padding:2px 7px; font-weight:600; font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; text-decoration:line-through; text-decoration-color:#F59E0B; }
+.chip-unknown { color:#6B8199; border-radius:4px; border:1px dashed #6B8199; padding:2px 7px; font-weight:600; font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; }
+
+.chip-live    { background:rgba(52,211,153,0.13); color:#34D399; border:1px solid rgba(52,211,153,0.27); }
+.chip-cached  { background:rgba(228,255,60,0.13);  color:#b5cc00; border:1px solid rgba(228,255,60,0.27); }
+.chip-stale   { background:rgba(245,158,11,0.13);  color:#F59E0B; border:1px solid rgba(245,158,11,0.27); }
+.chip-offline { background:#3A4D5E; color:#6B8199; border:1px solid #3A4D5E; }
+.chip-live,.chip-cached,.chip-stale,.chip-offline { border-radius:4px; padding:2px 7px; font-weight:700; font-size:0.72rem; letter-spacing:0.03em; text-transform:uppercase; }
+
+.nw-glass { background:rgba(255,255,255,0.14); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); }
+.telemetry-rail { border-left:2px solid var(--color-edge); }
+.telemetry-rail-gap { border-left:2px dashed var(--color-warn); }
