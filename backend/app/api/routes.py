@@ -275,20 +275,56 @@ def drop_plan(pid: str):
 
 @router.get("/plan/{pid}/routes")
 def get_plan_routes(pid: str):
-    """Return all diverse routes for this plan with metrics, score breakdown, and explanations."""
+    """Return all diverse routes for this plan with metrics, score breakdown, telemetry, and explanations."""
+    from ..core.route_landmarks import compute_route_telemetry
     e = eng()
     ap = _get_ap(e, pid)
     with e.state.lock:
         routes = getattr(ap, "routes", None)
         if routes is None and ap.planset:
             routes = ap.planset.get("routes", [])
+        routes = routes or []
+
+        # Build telemetry for every route (uses real POI data only)
+        pois_data = [
+            {
+                "id": str(p.id),
+                "lat": p.lat,
+                "lon": p.lon,
+                "name": p.name,
+                "cat": getattr(p, "category", getattr(p, "cat", "")),
+                "tier": str(getattr(p, "tier", "UNKNOWN")),
+                "hours_state": getattr(p, "hours_state_dict", None) or {
+                    "tier": str(getattr(p, "tier", "UNKNOWN")),
+                    "open": None,
+                    "status": "unknown",
+                },
+                "is_24h": bool(getattr(p, "is_24h", False)),
+                "last_osm_edit": getattr(p, "last_osm_edit", None),
+            }
+            for p in e.static.pois
+        ]
+        walk_speed = 1.2  # m/s default walking speed
+
+        telemetry_map: dict[str, dict] = {}
+        for r in routes:
+            poly = r.get("polyline", [])
+            telemetry_map[r["id"]] = compute_route_telemetry(
+                route_id=r["id"],
+                polyline=poly,
+                speed_m_s=walk_speed,
+                pois=pois_data,
+            )
+            r["telemetry"] = telemetry_map[r["id"]]
+
         return {
             "plan_id": pid,
-            "routes": routes or [],
+            "routes": routes,
             "tie": ap.planset.get("route_tie", False) if ap.planset else False,
             "tie_note": ap.planset.get("route_tie_note") if ap.planset else None,
             "routing_time_ms": ap.planset.get("routing_time_ms", 0.0) if ap.planset else 0.0,
         }
+
 
 
 @router.get("/plan/{pid}/stream")

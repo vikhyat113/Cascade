@@ -97,7 +97,16 @@ flowchart LR
 | Bus realtime, traffic speeds, closures, cab availability, incident reports | feed simulator | **SYNTHETIC** |
 | Incident history | seeded generator biased by OSM proxies | **SYNTHETIC** |
 
-Credits: © OpenStreetMap contributors (ODbL) · Weather data by Open-Meteo.com (CC BY 4.0) · map tiles © OpenStreetMap (light use).
+Credits: © OpenStreetMap contributors (ODbL) · Weather data by Open-Meteo.com (CC BY 4.0) · NASA Black Marble (VIIRS NTL) · MODIS Aqua LST (LP DAAC) · map tiles © OpenStreetMap (light use).
+
+### Open-Meteo Terms & Rate Limits
+- **Non-commercial use & License:** Open-Meteo forecast API is free for non-commercial use with attribution under Creative Commons Attribution 4.0 International (CC BY 4.0).
+- **Rate limits:**
+  - Up to 10,000 API calls per day
+  - Up to 5,000 API calls per hour
+  - Up to 600 API calls per minute
+- **NightWay consumption:** NightWay bundles all polygon grid cells into a single multi-location query polled every 15 minutes (`live_weather_interval_min: 15`), totaling 96 requests/day (well under 1% of the daily quota).
+- **Graceful degradation:** Every successful poll updates `data/weather_grid.json`. If a live request fails or times out, the backend serves the cached forecast while decaying the status chip (`LIVE -> CACHED -> STALE -> OFFLINE`).
 
 **Switching city:** edit `city_name`, `center`, `radius_m` and the `personas` place names in [backend/config.yaml](backend/config.yaml), then run `backend/.venv/Scripts/pip install -r requirements-data.txt` and `python scripts/fetch_all.py` (Overpass + OSMnx + Open-Meteo, a few minutes).
 

@@ -10,6 +10,7 @@ __pycache__/
 # node
 node_modules/
 frontend/dist/
+*.tsbuildinfo
 
 # large / regenerable data (compact packs in data/ are committed so the app runs offline)
 data/raw/

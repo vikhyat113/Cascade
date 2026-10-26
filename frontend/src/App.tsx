@@ -4,6 +4,7 @@ import { useT, type CopyKey } from "./copy";
 import { MapCanvas } from "./components/MapCanvas";
 import { LayerPanel, type LayerState, type FacilityCounts } from "./components/LayerPanel";
 import { BackButton, Banner, Pill } from "./components/ui";
+import { Icon } from "./components/Icon";
 import { useConnection } from "./lib/connection";
 import { isInsideCoverage, lastTrip, loadPlace, myLocation, rememberTrip, savePlace } from "./lib/saved";
 import { Home, NEEDS } from "./screens/Home";
@@ -11,7 +12,7 @@ import { OpenNow } from "./screens/OpenNow";
 import { Result } from "./screens/Result";
 import { Search } from "./screens/Search";
 import { HelpSheet, Trip } from "./screens/Trip";
-import { CompareRoutesSheet } from "./components/CompareRoutesSheet";
+import { RouteSheet } from "./components/RouteSheet";
 import type { AppConfig, AreaDiagnostics, LatLon, LayerMeta, Place, PlaceOnWay, RouteItem, SimpleView } from "./types";
 
 // Judges only: code-split, never in the first download (UI_SPEC §1.9, §5).
@@ -118,7 +119,7 @@ function Main() {
   const [routes, setRoutes] = useState<RouteItem[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [showCompare, setShowCompare] = useState(false);
-  const [showDominatedRoutes, setShowDominatedRoutes] = useState(false);
+  const [showDominatedRoutes] = useState(false);
   const seen = useRef(new Set<string>());
   const conn = useConnection(view?.connection ?? null);
 
@@ -359,7 +360,7 @@ function Main() {
   if (!cfg) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <span className="text-[2.5rem]" aria-hidden="true">🌙</span>
+        <Icon name="moon" size={48} className="text-lime opacity-60" />
         <p className="text-[1.2rem] font-semibold">{error || t("line.finding")}</p>
       </div>
     );
@@ -518,7 +519,7 @@ function Main() {
         />
       )}
       {showCompare && view && routes.length > 0 && (
-        <CompareRoutesSheet
+        <RouteSheet
           routes={routes}
           selectedId={selectedRouteId}
           onSelect={(id: string) => {
@@ -526,9 +527,18 @@ function Main() {
             const opt = options.find((o) => o.id === id);
             if (opt) setShownId(opt.id);
           }}
+          onStart={start}
+          starting={starting}
           onClose={() => setShowCompare(false)}
-          showDominated={showDominatedRoutes}
-          onToggleDominated={setShowDominatedRoutes}
+          fromName={from?.name || t("label.myLocation")}
+          toName={to?.name || ""}
+          onSwap={() => {
+            const tmp = from;
+            setFrom(to);
+            setTo(tmp ?? null);
+          }}
+          tripProgressM={0}
+          tripStarted={false}
         />
       )}
       {screen === "trip" && current && (

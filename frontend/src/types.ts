@@ -187,6 +187,7 @@ export type RouteItem = {
   why: string;
   loss_reason: string;
   recommended: boolean;
+  telemetry?: RouteTelemetry | null;
 };
 
 export type PlanRoutesResponse = {
@@ -197,4 +198,33 @@ export type PlanRoutesResponse = {
   routing_time_ms: number;
 };
 
+/** A single event on a route's telemetry timeline. */
+export interface TelemetryEvent {
+  id: string;
+  type: "poi" | "road_class" | "lighting" | "gap_warning" | "closure" | "crossing" | "walk_section";
+  name: string;
+  chainage_m: number;
+  offset_m: number;
+  eta_expected_s: number;
+  eta_best_s: number;
+  eta_worst_s: number;
+  hours_state: "open" | "maybe_open" | "unknown" | "closed";
+  tier: "KNOWN" | "PROBABLE" | "OUTDATED" | "UNKNOWN";
+  source: string;
+  last_osm_edit?: string | null;
+  icon_key: string;
+  length_m?: number;       // for gap_warning and lighting stretches
+  road_class?: string;     // for road_class events
+}
+
+/** Telemetry for one route */
+export interface RouteTelemetry {
+  route_id: string;
+  total_length_m: number;
+  events: TelemetryEvent[];
+  max_gap_m: number;
+  unknown_lighting_m: number;
+  computed_at: string;
+  error?: string | null;
+}
 

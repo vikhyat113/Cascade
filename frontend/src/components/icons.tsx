@@ -1,29 +1,37 @@
-// Icons + words + colour together (UI_SPEC §1.6). Emoji are light and render on cheap phones.
-export const STEP_ICON: Record<string, string> = { walk: "🚶", wait: "⏳", bus: "🚌", metro: "🚇", cab: "🚕", done: "🏁" };
-export const PLACE_ICON: Record<string, string> = {
-  pharmacy: "💊", hospital: "🏥", police: "👮", food: "🍲", shop: "🛒", fuel: "⛽", atm: "🏧", help: "🆘",
+/**
+ * icons.tsx — compatibility shim; all icon logic is now in Icon.tsx.
+ * Exports plain semantic records used by existing screens.
+ * No emoji. Use Icon component for rendering.
+ */
+export { Icon, Chevron, STEP_TO_ICON, PLACE_TYPE_TO_ICON } from "./Icon";
+export type { IconName } from "./Icon";
+import type { IconName } from "./Icon";
+
+// Semantic icon key maps (replaces emoji-based STEP_ICON / PLACE_ICON)
+export const STEP_ICON: Record<string, IconName> = {
+  walk: "walk", wait: "wait", bus: "bus", metro: "metro", cab: "cab", done: "done",
 };
+export const PLACE_ICON: Record<string, IconName> = {
+  pharmacy: "medicine", hospital: "hospital", clinic: "hospital",
+  police: "police", food: "food", restaurant: "food",
+  shop: "landmark", fuel: "petrol-pump", atm: "atm", help: "sos",
+};
+
+// Safety / timing / state now return { iconName, color } — no emoji
 export const SAFETY = {
-  safe: { icon: "🟢", color: "text-good" },
-  ok: { icon: "🟡", color: "text-warn" },
-  careful: { icon: "🔴", color: "text-bad" },
-} as const;
-export const TIMING = {
-  on_time: { icon: "✅", color: "text-good" },
-  maybe_late: { icon: "⚠️", color: "text-warn" },
-  too_late: { icon: "❌", color: "text-bad" },
-} as const;
-export const STATE = {
-  open: { icon: "✅", color: "text-good" },
-  maybe_open: { icon: "🟡", color: "text-warn" },
-  not_sure: { icon: "❔", color: "text-soft" },
+  safe:    { iconName: "shield-check" as IconName,    color: "text-good" },
+  ok:      { iconName: "shield-alert" as IconName,    color: "text-warn" },
+  careful: { iconName: "shield-alert" as IconName,    color: "text-bad"  },
 } as const;
 
-export function Chevron({ dir = "right" }: { dir?: "right" | "left" | "down" | "up" }) {
-  const r = { right: 0, down: 90, left: 180, up: 270 }[dir];
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style={{ transform: `rotate(${r}deg)` }}>
-      <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
+export const TIMING = {
+  on_time:    { iconName: "check-circle"    as IconName, color: "text-good" },
+  maybe_late: { iconName: "alert-triangle"  as IconName, color: "text-warn" },
+  too_late:   { iconName: "x-circle"        as IconName, color: "text-bad"  },
+} as const;
+
+export const STATE = {
+  open:       { iconName: "check-circle"   as IconName, color: "text-good" },
+  maybe_open: { iconName: "alert-triangle" as IconName, color: "text-warn" },
+  not_sure:   { iconName: "info"           as IconName, color: "text-soft" },
+} as const;
