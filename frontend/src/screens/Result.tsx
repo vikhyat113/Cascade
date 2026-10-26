@@ -47,9 +47,9 @@ export function WarningLine({ option, onBackup }: { option: Option; onBackup: (i
   );
 }
 
-export function Result({ options, shown, onTab, onBackup, onStart, onBack, showPlaces, setShowPlaces, starting, showDemo, onDemo, onHeight }: {
+export function Result({ options, shown, onTab, onBackup, onStart, onBack, onCompare, showPlaces, setShowPlaces, starting, showDemo, onDemo, onHeight }: {
   options: Option[]; shown: Option; onTab: (id: string) => void; onBackup: (id: string) => void; onStart: () => void;
-  onBack: () => void; showPlaces: boolean; setShowPlaces: (v: boolean) => void; starting: boolean;
+  onBack: () => void; onCompare?: () => void; showPlaces: boolean; setShowPlaces: (v: boolean) => void; starting: boolean;
   showDemo: boolean; onDemo: () => void; onHeight: (h: number) => void;
 }) {
   const { t } = useT();
@@ -89,7 +89,20 @@ export function Result({ options, shown, onTab, onBackup, onStart, onBack, showP
 
       <WarningLine option={shown} onBackup={onBackup} />
 
-      <div className="mt-4"><BigButton onClick={onStart} disabled={starting}>{t("label.start")}</BigButton></div>
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <div className="flex-1">
+          <BigButton onClick={onStart} disabled={starting}>{t("label.start")}</BigButton>
+        </div>
+        {onCompare && (
+          <button
+            onClick={onCompare}
+            className="flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-edge bg-raised px-4 text-[0.98rem] font-semibold text-ink transition-colors hover:border-accent hover:bg-edge/40"
+          >
+            <span aria-hidden="true">⚖️</span>
+            <span>{t("label.compareWays")}</span>
+          </button>
+        )}
+      </div>
 
       {shown.places.length > 0 && (
         <div className="mt-3">

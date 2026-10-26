@@ -91,6 +91,16 @@ class WorldState:
         self._incident_seq = 0
         self._closure_seq = 0
 
+        # Live weather initialization
+        if getattr(static, "live_weather", False):
+            if "weather_live" in self.sources:
+                self.sources["weather_live"].synthetic = False
+                self.sources["weather_live"].label = "Weather observations (Open-Meteo live)"
+            adapter = getattr(static, "weather_live_adapter", None)
+            if adapter:
+                for f in adapter.build_facts(self.now()):
+                    self.put(f)
+
     # ---- facts -------------------------------------------------------------------
     def now(self) -> datetime:
         return self.clock.now()

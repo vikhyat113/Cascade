@@ -83,6 +83,19 @@ class RoadGraph:
         counts = np.bincount(uu, minlength=self.n)
         self._indptr = np.r_[0, np.cumsum(counts)].astype(np.int32)
         self._indices = vv.astype(np.int32)
+        self._adj = self._build_adj()
+
+    def _build_adj(self) -> list[list[tuple[int, int, bool]]]:
+        adj: list[list[tuple[int, int, bool]]] = [[] for _ in range(self.n)]
+        if self.directed:
+            for eid in range(self.m):
+                adj[int(self.eu[eid])].append((int(self.ev[eid]), eid, False))
+        else:
+            for eid in range(self.m):
+                u, v = int(self.eu[eid]), int(self.ev[eid])
+                adj[u].append((v, eid, False))
+                adj[v].append((u, eid, True))
+        return adj
 
     def shortest_path(self, src: int, dst: int, edge_cost: np.ndarray,
                       blocked: Optional[np.ndarray] = None) -> Optional[list[tuple[int, bool]]]:

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from ..core import heatmap as heatmap_mod
 from ..core import needs, nlp, planner
+from ..core.astronomy import get_moon_illumination
 from ..core.clock import to_night
 from ..core.services import open_fact
 from ..core.sim import events, scenarios
@@ -25,6 +26,32 @@ from ..presentation import simple_view
 
 router = APIRouter(prefix="/api")
 ENGINE = {"engine": None, "error": None, "scenario_results": None}
+
+_LAYER_QUEUES: set[asyncio.Queue] = set()
+_LAST_LAYER_REFRESH: dict[str, float] = {}
+
+
+def broadcast_layer_update(data: dict) -> None:
+    msg = json.dumps(data, default=str)
+    for q in list(_LAYER_QUEUES):
+        try:
+            q.put_nowait(msg)
+        except Exception:
+            pass
+
+
+def _compute_status_chip(is_live: bool, age_s: Optional[float], ttl_s: int) -> str:
+    if age_s is None:
+        return "OFFLINE"
+    if not is_live:
+        return "STALE" if age_s > ttl_s else "CACHED"
+    if age_s <= ttl_s:
+        return "LIVE"
+    elif age_s <= 3 * ttl_s:
+        return "CACHED"
+    elif age_s <= 10 * ttl_s:
+        return "STALE"
+    return "OFFLINE"
 
 
 def eng():
@@ -244,6 +271,24 @@ def choose_plan(pid: str, body: ChooseBody):
 def drop_plan(pid: str):
     eng().replanner.plans.pop(pid, None)
     return {"ok": True}
+
+
+@router.get("/plan/{pid}/routes")
+def get_plan_routes(pid: str):
+    """Return all diverse routes for this plan with metrics, score breakdown, and explanations."""
+    e = eng()
+    ap = _get_ap(e, pid)
+    with e.state.lock:
+        routes = getattr(ap, "routes", None)
+        if routes is None and ap.planset:
+            routes = ap.planset.get("routes", [])
+        return {
+            "plan_id": pid,
+            "routes": routes or [],
+            "tie": ap.planset.get("route_tie", False) if ap.planset else False,
+            "tie_note": ap.planset.get("route_tie_note") if ap.planset else None,
+            "routing_time_ms": ap.planset.get("routing_time_ms", 0.0) if ap.planset else 0.0,
+        }
 
 
 @router.get("/plan/{pid}/stream")
@@ -561,8 +606,6 @@ def pois(time: Optional[str] = None):  # noqa: A002
     lamps = [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [p.lon, p.lat]},
               "properties": {"cat": "street_lamp"}} for p in e.static.pois if p.cat == "street_lamp"]
     return {"type": "FeatureCollection", "features": feats + lamps, "time": t.isoformat(timespec="minutes")}
-
-
 @router.get("/layers")
 def list_layers():
     e = eng()
@@ -575,12 +618,18 @@ def list_layers():
     v_view = s.source_view("viirs_ntl") if v_src else None
     v_data = getattr(st, "viirs_data", None)
     v_cells = v_data.get("rows", []) if v_data else []
-    v_unknown = sum(1 for r in v_cells if r.get("radiance") is None or r.get("status_hint") == "UNKNOWN") if v_cells else 0
+    v_unknown = sum(1 for r in v_cells if r.get("value") is None or r.get("radiance") is None or r.get("status_hint") == "UNKNOWN") if v_cells else 0
+    v_age_s = v_view.age_s if v_view else None
+    v_live = bool(st.cfg.get("live_satellite", False))
+    v_chip = _compute_status_chip(v_live, v_age_s, 3888000)
+    moon_info = get_moon_illumination(s.now(), st.center[0], st.center[1])
+    last_pass = v_data.get("last_satellite_pass") if v_data else "Recent pass"
+
     layers_meta.append({
         "id": "viirs_ntl",
         "name": "Night lights (VIIRS)",
         "source": v_data.get("source") if v_data else "NASA Black Marble (VNP46) / Suomi NPP VIIRS DNB",
-        "product": v_data.get("product") if v_data else "VIIRS_Black_Marble",
+        "product": v_data.get("product") if v_data else "VNP46A2 (daily 500m night lights) / VNP46A3 composite",
         "date_range": v_data.get("acquired_range") if v_data else None,
         "retrieved_at": v_data.get("retrieved_at") if v_data else None,
         "native_resolution": v_data.get("native_resolution", "15 arc-seconds (~500 m)") if v_data else "15 arc-seconds (~500 m)",
@@ -588,13 +637,18 @@ def list_layers():
         "license": v_data.get("license") if v_data else "NASA Open Data Policy / Public Domain",
         "attribution": v_data.get("attribution") if v_data else "NASA EOSDIS / Black Marble Science Team",
         "status": v_view.status if v_view else "UNKNOWN",
+        "status_chip": v_chip,
         "confidence": v_view.confidence if v_view else 0.0,
-        "age_s": v_view.age_s if v_view else None,
+        "age_s": v_age_s,
         "available": bool(v_data and v_src and v_src.enabled),
+        "live": v_live,
         "cell_count": len(v_cells),
         "unknown_share": round((v_unknown / max(1, len(v_cells))) * 100, 1),
         "synthetic": False,
-        "note": "Blocky 500m cells showing nighttime artificial light radiance and percentile.",
+        "moon_illumination": moon_info,
+        "last_satellite_pass": last_pass,
+        "history_window_nights": v_data.get("history_window_nights", 14) if v_data else 14,
+        "note": "Blocky 500m cells showing nighttime artificial light radiance and percentile over a 14-night window.",
     })
 
     # 2. Thermal LST
@@ -603,6 +657,9 @@ def list_layers():
     t_data = getattr(st, "thermal_data", None)
     t_cells = t_data.get("cells", []) if t_data else []
     t_unknown = sum(1 for c in t_cells if c.get("value") is None or c.get("status") == "UNKNOWN") if t_cells else 0
+    t_age_s = t_view.age_s if t_view else None
+    t_chip = _compute_status_chip(False, t_age_s, 259200)
+
     layers_meta.append({
         "id": "thermal_lst",
         "name": "Night surface temperature (MODIS Aqua)",
@@ -615,13 +672,16 @@ def list_layers():
         "license": t_data.get("license") if t_data else "NASA Open Data Policy (CC0 / Public Domain)",
         "attribution": t_data.get("attribution") if t_data else "NASA EOSDIS LP DAAC",
         "status": t_view.status if t_view else "UNKNOWN",
+        "status_chip": t_chip,
         "confidence": t_view.confidence if t_view else 0.0,
-        "age_s": t_view.age_s if t_view else None,
+        "age_s": t_age_s,
         "available": bool(t_data and t_src and t_src.enabled),
+        "live": False,
         "cell_count": len(t_cells),
         "unknown_share": round((t_unknown / max(1, len(t_cells))) * 100, 1),
         "synthetic": False,
         "note": "1 km land-surface temperature from MODIS Aqua night pass (~01:30 local). Cloud-masked cells remain UNKNOWN.",
+        "microclimate_note": "Air temperature varies by less than ~1-2°C across this 7x7 km area because regional atmospheric mixing dominates at 2 km grid scale, whereas land surface temperature (LST) captures sharp thermal variations between asphalt, dense buildings, and open vegetation.",
     })
 
     # 3. Weather Grid
@@ -631,10 +691,20 @@ def list_layers():
     w_points = w_data.get("points", []) if w_data else []
     w_times = w_points[0].get("hourly", {}).get("time", []) if w_points else []
     w_date_range = f"{w_times[0]} to {w_times[-1]}" if w_times else None
+    w_live = bool(st.cfg.get("live_weather", False))
+
+    if hasattr(st, "weather_live_adapter") and st.weather_live_adapter is not None:
+        w_chip, adapter_age, w_src_label = st.weather_live_adapter.get_status_chip(s.now())
+        w_age_s = adapter_age
+    else:
+        w_age_s = w_view.age_s if w_view else None
+        w_chip = _compute_status_chip(w_live, w_age_s, 86400)
+        w_src_label = "Open-Meteo API / DWD ICON & ECMWF IFS"
+
     layers_meta.append({
         "id": "weather_grid",
         "name": "Weather forecast grid (Open-Meteo)",
-        "source": w_data.get("source") if w_data else "Open-Meteo API / DWD ICON & ECMWF IFS",
+        "source": w_src_label,
         "product": w_data.get("model") if w_data else "ECMWF IFS / DWD ICON blended forecast",
         "date_range": w_date_range,
         "retrieved_at": w_data.get("retrieved_at") if w_data else None,
@@ -643,9 +713,11 @@ def list_layers():
         "license": w_data.get("license") if w_data else "Weather data by Open-Meteo.com (CC BY 4.0)",
         "attribution": w_data.get("attribution") if w_data else "Open-Meteo.com under CC BY 4.0",
         "status": w_view.status if w_view else "UNKNOWN",
+        "status_chip": w_chip,
         "confidence": w_view.confidence if w_view else 0.0,
-        "age_s": w_view.age_s if w_view else None,
+        "age_s": w_age_s,
         "available": bool(w_data and w_src and w_src.enabled),
+        "live": w_live,
         "cell_count": len(w_points),
         "unknown_share": 0.0,
         "synthetic": False,
@@ -655,190 +727,425 @@ def list_layers():
     return layers_meta
 
 
-@router.get("/layers/{layer_id}")
-def get_layer(layer_id: str, hour: Optional[int] = None):
+@router.get("/layers/weather")
+def get_weather_layer(
+    var: str = "apparent_temperature",
+    hour: Optional[int] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+):
+    e = eng()
+    st = e.static
+    s = e.state
+    data = getattr(st, "weather_grid_data", None)
+    if not data:
+        raise HTTPException(404, "Layer 'weather_grid' file is absent. Run scripts/fetch_weather_grid.py first.")
+
+    h_idx = 2
+    if hour is not None:
+        h_idx = max(0, int(hour))
+    else:
+        h_idx = s.now().hour
+
+    units = data.get("units", {})
+    unit = units.get(var, "°C" if "temp" in var else "")
+    grid_km = float(data.get("grid_spacing_km", 2.0))
+    dlat = (grid_km * 1000.0) / 111195.0
+    acq = data.get("retrieved_at")
+
+    points = data.get("points", [])
+    feats = []
+
+    nearest_pt = None
+    nearest_dist = float("inf")
+
+    for pt in points:
+        pt_lat, pt_lon = float(pt["lat"]), float(pt["lon"])
+        if lat is not None and lon is not None:
+            dist = (pt_lat - lat) ** 2 + (pt_lon - lon) ** 2
+            if dist < nearest_dist:
+                nearest_dist = dist
+                nearest_pt = pt
+
+        cos_l = math.cos(math.radians(pt_lat))
+        dlon = dlat / cos_l if abs(cos_l) > 1e-6 else dlat
+        half_lat = dlat / 2.0
+        half_lon = dlon / 2.0
+
+        hly = pt.get("hourly", {})
+        times = hly.get("time", [])
+        idx = min(h_idx, len(times) - 1) if times else 0
+        t_str = times[idx] if idx < len(times) else None
+
+        val = hly.get(var, [])[idx] if idx < len(hly.get(var, [])) else None
+        temp = hly.get("temperature_2m", [])[idx] if idx < len(hly.get("temperature_2m", [])) else None
+        app_temp = hly.get("apparent_temperature", [])[idx] if idx < len(hly.get("apparent_temperature", [])) else None
+        precip = hly.get("precipitation", [])[idx] if idx < len(hly.get("precipitation", [])) else None
+        cloud = hly.get("cloud_cover", [])[idx] if idx < len(hly.get("cloud_cover", [])) else None
+        wind = hly.get("wind_speed_10m", [])[idx] if idx < len(hly.get("wind_speed_10m", [])) else None
+        rh = hly.get("relative_humidity_2m", [])[idx] if idx < len(hly.get("relative_humidity_2m", [])) else None
+        vis = hly.get("visibility", [])[idx] if idx < len(hly.get("visibility", [])) else None
+
+        coords = [
+            [round(pt_lon - half_lon, 6), round(pt_lat - half_lat, 6)],
+            [round(pt_lon + half_lon, 6), round(pt_lat - half_lat, 6)],
+            [round(pt_lon + half_lon, 6), round(pt_lat + half_lat, 6)],
+            [round(pt_lon - half_lon, 6), round(pt_lat + half_lat, 6)],
+            [round(pt_lon - half_lon, 6), round(pt_lat - half_lat, 6)],
+        ]
+        feats.append({
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [coords]},
+            "properties": {
+                "id": pt.get("id"),
+                "lat": pt_lat,
+                "lon": pt_lon,
+                "hour": h_idx,
+                "time": t_str,
+                "var": var,
+                "value": val,
+                "temperature_2m": temp,
+                "apparent_temperature": app_temp,
+                "precipitation": precip,
+                "cloud_cover": cloud,
+                "wind_speed_10m": wind,
+                "relative_humidity_2m": rh,
+                "visibility": vis,
+                "unit": unit,
+                "status": "KNOWN" if val is not None else "UNKNOWN",
+                "acquisition_time": acq,
+            }
+        })
+
+    # Build origin forecast chart data if requested
+    origin_forecast = []
+    if nearest_pt is not None:
+        hly = nearest_pt.get("hourly", {})
+        times = hly.get("time", [])
+        temps = hly.get("temperature_2m", [])
+        app_temps = hly.get("apparent_temperature", [])
+        precips = hly.get("precipitation", [])
+        for i in range(min(48, len(times))):
+            origin_forecast.append({
+                "hour": i % 24,
+                "time": times[i],
+                "temperature_2m": temps[i] if i < len(temps) else None,
+                "apparent_temperature": app_temps[i] if i < len(app_temps) else None,
+                "precipitation": precips[i] if i < len(precips) else 0.0,
+            })
+
+    w_live = bool(st.cfg.get("live_weather", False))
+    if hasattr(st, "weather_live_adapter") and st.weather_live_adapter is not None:
+        chip, age_s, _ = st.weather_live_adapter.get_status_chip(s.now())
+    else:
+        v = s.source_view("weather_grid")
+        age_s = v.age_s if v else None
+        chip = _compute_status_chip(w_live, age_s, 86400)
+
+    return {
+        "type": "FeatureCollection",
+        "layer_id": "weather_grid",
+        "var": var,
+        "hour": h_idx,
+        "metadata": {
+            "source": data.get("source"),
+            "model": data.get("model"),
+            "native_resolution": data.get("native_resolution"),
+            "units": units,
+            "status_chip": chip,
+            "age_s": age_s,
+            "live": w_live,
+            "retrieved_at": acq,
+        },
+        "features": feats,
+        "origin_forecast": origin_forecast,
+    }
+
+
+@router.get("/layers/night_lights")
+def get_night_lights_layer():
+    e = eng()
+    st = e.static
+    s = e.state
+    data = getattr(st, "viirs_data", None)
+    if not data:
+        raise HTTPException(404, "Layer 'viirs_ntl' file is absent. Run scripts/fetch_viirs.py first.")
+
+    cell_size = float(data.get("cell_size_deg", 0.004167))
+    half = cell_size / 2.0
+    unit = data.get("unit", "nW·cm⁻²·sr⁻¹")
+    acq = data.get("retrieved_at")
+
+    feats = []
+    for r in data.get("rows", []):
+        lat, lon = float(r["lat"]), float(r["lon"])
+        val = r.get("value") if r.get("value") is not None else r.get("radiance")
+        latest_val = r.get("latest_radiance")
+        median_val = r.get("median_radiance")
+        latest_date = r.get("latest_date")
+        n_valid = r.get("n_valid", 1 if val is not None else 0)
+        status_val = "UNKNOWN" if (val is None or r.get("status_hint") == "UNKNOWN") else "KNOWN"
+
+        coords = [
+            [round(lon - half, 6), round(lat - half, 6)],
+            [round(lon + half, 6), round(lat - half, 6)],
+            [round(lon + half, 6), round(lat + half, 6)],
+            [round(lon - half, 6), round(lat + half, 6)],
+            [round(lon - half, 6), round(lat - half, 6)],
+        ]
+        feats.append({
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [coords]},
+            "properties": {
+                "i": r.get("i"),
+                "j": r.get("j"),
+                "lat": lat,
+                "lon": lon,
+                "value": val,
+                "radiance": val,
+                "latest_radiance": latest_val,
+                "latest_date": latest_date,
+                "median_radiance": median_val,
+                "percentile": r.get("percentile"),
+                "n_valid": n_valid,
+                "unit": unit,
+                "status": status_val,
+                "acquisition_time": latest_date or acq,
+            }
+        })
+
+    v_live = bool(st.cfg.get("live_satellite", False))
+    v = s.source_view("viirs_ntl")
+    age_s = v.age_s if v else None
+    chip = _compute_status_chip(v_live, age_s, 3888000)
+
+    moon_info = data.get("moon_illumination") or get_moon_illumination(s.now(), st.center[0], st.center[1])
+
+    return {
+        "type": "FeatureCollection",
+        "layer_id": "viirs_ntl",
+        "metadata": {
+            "source": data.get("source"),
+            "product": data.get("product"),
+            "native_resolution": data.get("native_resolution"),
+            "unit": unit,
+            "cell_size_deg": cell_size,
+            "moon_illumination": moon_info,
+            "last_satellite_pass": data.get("last_satellite_pass", "Recent pass"),
+            "last_pass_date": data.get("last_pass_date"),
+            "days_ago": data.get("days_ago"),
+            "history_window_nights": data.get("history_window_nights", 14),
+            "status_chip": chip,
+            "age_s": age_s,
+            "live": v_live,
+            "retrieved_at": acq,
+        },
+        "features": feats,
+    }
+
+
+@router.get("/layers/thermal")
+def get_thermal_layer(
+    source: str = "night_surface",
+    hour: Optional[int] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+):
+    if source == "air_temp":
+        return get_weather_layer(var="apparent_temperature", hour=hour, lat=lat, lon=lon)
+
+    if source == "landsat_day":
+        raise HTTPException(
+            404,
+            "Landsat 8/9 daytime surface temperature scene not currently acquired for this date. Layer unavailable.",
+        )
+
+    e = eng()
+    st = e.static
+    s = e.state
+    data = getattr(st, "thermal_data", None)
+    if not data:
+        raise HTTPException(404, "Layer 'thermal_lst' file is absent. Run scripts/fetch_thermal.py first.")
+
+    dlat = 926.625 / 111195.0
+    unit = data.get("unit", "°C")
+    acq = data.get("acquisition_time") or data.get("retrieved_at")
+
+    feats = []
+    nearest_c = None
+    nearest_dist = float("inf")
+
+    for c in data.get("cells", []):
+        c_lat, c_lon = float(c["lat"]), float(c["lon"])
+        if lat is not None and lon is not None:
+            dist = (c_lat - lat) ** 2 + (c_lon - lon) ** 2
+            if dist < nearest_dist:
+                nearest_dist = dist
+                nearest_c = c
+
+        cos_l = math.cos(math.radians(c_lat))
+        dlon = dlat / cos_l if abs(cos_l) > 1e-6 else dlat
+        half_lat = dlat / 2.0
+        half_lon = dlon / 2.0
+        val = c.get("value")
+        status_val = c.get("status", "UNKNOWN") if val is not None else "UNKNOWN"
+        coords = [
+            [round(c_lon - half_lon, 6), round(c_lat - half_lat, 6)],
+            [round(c_lon + half_lon, 6), round(c_lat - half_lat, 6)],
+            [round(c_lon + half_lon, 6), round(c_lat + half_lat, 6)],
+            [round(c_lon - half_lon, 6), round(c_lat + half_lat, 6)],
+            [round(c_lon - half_lon, 6), round(c_lat - half_lat, 6)],
+        ]
+        feats.append({
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [coords]},
+            "properties": {
+                "i": c.get("i"),
+                "j": c.get("j"),
+                "lat": c_lat,
+                "lon": c_lon,
+                "value": val,
+                "unit": unit,
+                "status": status_val,
+                "quality": c.get("quality", "clear"),
+                "acquisition_time": c.get("acquisition_time") or acq,
+            }
+        })
+
+    v = s.source_view("thermal_lst")
+    age_s = v.age_s if v else None
+    chip = _compute_status_chip(False, age_s, 259200)
+
+    # Origin hourly forecast for temperature chart if weather grid exists
+    origin_forecast = []
+    w_data = getattr(st, "weather_grid_data", None)
+    if w_data and lat is not None and lon is not None:
+        pts = w_data.get("points", [])
+        if pts:
+            best_p = min(pts, key=lambda p: (float(p["lat"]) - lat)**2 + (float(p["lon"]) - lon)**2)
+            hly = best_p.get("hourly", {})
+            times = hly.get("time", [])
+            temps = hly.get("temperature_2m", [])
+            app_temps = hly.get("apparent_temperature", [])
+            for i in range(min(24, len(times))):
+                origin_forecast.append({
+                    "hour": i % 24,
+                    "time": times[i],
+                    "temperature_2m": temps[i] if i < len(temps) else None,
+                    "apparent_temperature": app_temps[i] if i < len(app_temps) else None,
+                })
+
+    return {
+        "type": "FeatureCollection",
+        "layer_id": "thermal_lst",
+        "source": source,
+        "metadata": {
+            "source": data.get("source"),
+            "product": data.get("product"),
+            "native_resolution": data.get("native_resolution"),
+            "unit": unit,
+            "status_chip": chip,
+            "age_s": age_s,
+            "live": False,
+            "retrieved_at": acq,
+            "microclimate_note": "Air temperature varies by less than ~1-2°C across this 7x7 km area because regional atmospheric mixing dominates at 2 km grid scale, whereas land surface temperature (LST) captures sharp thermal variations between asphalt, dense buildings, and open vegetation.",
+        },
+        "features": feats,
+        "origin_forecast": origin_forecast,
+    }
+
+
+class LayerRefreshBody(BaseModel):
+    layer: str = "weather"
+
+
+@router.post("/layers/refresh")
+def refresh_layer(body: Optional[LayerRefreshBody] = None, layer: Optional[str] = None):
+    layer_name = (body.layer if body else None) or layer or "weather"
+    now_ts = time.time()
+    last = _LAST_LAYER_REFRESH.get(layer_name, 0.0)
+    if now_ts - last < 5.0:
+        raise HTTPException(429, "Rate limit: please wait 5 seconds between manual refreshes.")
+    _LAST_LAYER_REFRESH[layer_name] = now_ts
+
     e = eng()
     st = e.static
     s = e.state
 
-    if layer_id == "viirs_ntl":
-        data = getattr(st, "viirs_data", None)
-        if not data:
-            raise HTTPException(404, "Layer 'viirs_ntl' file is absent. Run scripts/fetch_viirs.py first.")
-        cell_size = float(data.get("cell_size_deg", 0.004167))
-        half = cell_size / 2.0
-        unit = data.get("unit", "nW·cm⁻²·sr⁻¹")
-        acq = data.get("retrieved_at")
-        feats = []
-        for r in data.get("rows", []):
-            lat, lon = float(r["lat"]), float(r["lon"])
-            val = r.get("radiance")
-            status_val = "UNKNOWN" if (val is None or r.get("status_hint") == "UNKNOWN") else "KNOWN"
-            coords = [
-                [round(lon - half, 6), round(lat - half, 6)],
-                [round(lon + half, 6), round(lat - half, 6)],
-                [round(lon + half, 6), round(lat + half, 6)],
-                [round(lon - half, 6), round(lat + half, 6)],
-                [round(lon - half, 6), round(lat - half, 6)],
-            ]
-            feats.append({
-                "type": "Feature",
-                "geometry": {"type": "Polygon", "coordinates": [coords]},
-                "properties": {
-                    "i": r.get("i"),
-                    "j": r.get("j"),
-                    "lat": lat,
-                    "lon": lon,
-                    "value": val,
-                    "percentile": r.get("percentile"),
-                    "unit": unit,
-                    "status": status_val,
-                    "acquisition_time": acq,
-                }
-            })
+    if layer_name in ("weather", "weather_grid"):
+        adapter = getattr(st, "weather_live_adapter", None)
+        if adapter:
+            ok = adapter.poll()
+            if ok:
+                st.weather_grid_data = adapter.grid_data
+                st.weather_grid_observed_at = adapter.last_fetch
+                with s.lock:
+                    for f in adapter.build_facts(s.now()):
+                        s.put(f)
+                broadcast_layer_update({
+                    "layer": "weather",
+                    "action": "refresh",
+                    "timestamp": adapter.last_fetch.isoformat() if adapter.last_fetch else None,
+                })
+            chip, age_s, src = adapter.get_status_chip(s.now())
+            return {
+                "ok": ok,
+                "layer": "weather",
+                "status_chip": chip,
+                "age_s": age_s,
+                "source": src,
+                "retrieved_at": adapter.last_fetch.isoformat() if adapter.last_fetch else None,
+            }
+        return {"ok": False, "layer": "weather", "message": "Weather live adapter not initialized"}
+
+    elif layer_name in ("night_lights", "viirs_ntl"):
+        v_data = getattr(st, "viirs_data", {})
+        last_pass = v_data.get("last_satellite_pass", "Recent pass")
         return {
-            "type": "FeatureCollection",
-            "layer_id": layer_id,
-            "metadata": {
-                "source": data.get("source"),
-                "product": data.get("product"),
-                "native_resolution": data.get("native_resolution"),
-                "unit": unit,
-                "cell_size_deg": cell_size,
-            },
-            "features": feats,
+            "ok": True,
+            "layer": "night_lights",
+            "message": f"VIIRS satellite pass checked. {last_pass}",
+            "last_satellite_pass": last_pass,
         }
 
-    elif layer_id == "thermal_lst":
-        data = getattr(st, "thermal_data", None)
-        if not data:
-            raise HTTPException(404, "Layer 'thermal_lst' file is absent. Run scripts/fetch_thermal.py first.")
-        dlat = 926.625 / 111195.0
-        unit = data.get("unit", "°C")
-        acq = data.get("acquisition_time") or data.get("retrieved_at")
-        feats = []
-        for c in data.get("cells", []):
-            lat, lon = float(c["lat"]), float(c["lon"])
-            cos_l = math.cos(math.radians(lat))
-            dlon = dlat / cos_l if abs(cos_l) > 1e-6 else dlat
-            half_lat = dlat / 2.0
-            half_lon = dlon / 2.0
-            val = c.get("value")
-            status_val = c.get("status", "UNKNOWN") if val is not None else "UNKNOWN"
-            coords = [
-                [round(lon - half_lon, 6), round(lat - half_lat, 6)],
-                [round(lon + half_lon, 6), round(lat - half_lat, 6)],
-                [round(lon + half_lon, 6), round(lat + half_lat, 6)],
-                [round(lon - half_lon, 6), round(lat + half_lat, 6)],
-                [round(lon - half_lon, 6), round(lat - half_lat, 6)],
-            ]
-            feats.append({
-                "type": "Feature",
-                "geometry": {"type": "Polygon", "coordinates": [coords]},
-                "properties": {
-                    "i": c.get("i"),
-                    "j": c.get("j"),
-                    "lat": lat,
-                    "lon": lon,
-                    "value": val,
-                    "unit": unit,
-                    "status": status_val,
-                    "quality": c.get("quality", "clear"),
-                    "acquisition_time": c.get("acquisition_time") or acq,
-                }
-            })
-        return {
-            "type": "FeatureCollection",
-            "layer_id": layer_id,
-            "metadata": {
-                "source": data.get("source"),
-                "product": data.get("product"),
-                "native_resolution": data.get("native_resolution"),
-                "unit": unit,
-            },
-            "features": feats,
-        }
+    raise HTTPException(400, f"Unsupported refresh layer '{layer_name}'. Supported: weather, night_lights.")
 
-    elif layer_id == "weather_grid":
-        data = getattr(st, "weather_grid_data", None)
-        if not data:
-            raise HTTPException(404, "Layer 'weather_grid' file is absent. Run scripts/fetch_weather_grid.py first.")
 
-        h_idx = 2  # default 02:00
-        if hour is not None:
-            h_idx = max(0, int(hour))
-        else:
-            sim_h = s.now().hour
-            h_idx = sim_h
+@router.get("/layers/stream")
+async def stream_layers(request: Request):
+    q: asyncio.Queue = asyncio.Queue(maxsize=30)
+    _LAYER_QUEUES.add(q)
 
-        unit = data.get("units", {}).get("temperature_2m", "°C")
-        grid_km = float(data.get("grid_spacing_km", 2.0))
-        dlat = (grid_km * 1000.0) / 111195.0
-        acq = data.get("retrieved_at")
+    async def gen():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"event: layer_update\ndata: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            _LAYER_QUEUES.discard(q)
 
-        feats = []
-        for pt in data.get("points", []):
-            lat, lon = float(pt["lat"]), float(pt["lon"])
-            cos_l = math.cos(math.radians(lat))
-            dlon = dlat / cos_l if abs(cos_l) > 1e-6 else dlat
-            half_lat = dlat / 2.0
-            half_lon = dlon / 2.0
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
-            hly = pt.get("hourly", {})
-            times = hly.get("time", [])
-            idx = min(h_idx, len(times) - 1) if times else 0
-            t_str = times[idx] if idx < len(times) else None
-            temp = hly.get("temperature_2m", [])[idx] if idx < len(hly.get("temperature_2m", [])) else None
-            app_temp = hly.get("apparent_temperature", [])[idx] if idx < len(hly.get("apparent_temperature", [])) else None
-            precip = hly.get("precipitation", [])[idx] if idx < len(hly.get("precipitation", [])) else None
-            cloud = hly.get("cloud_cover", [])[idx] if idx < len(hly.get("cloud_cover", [])) else None
-            wind = hly.get("wind_speed_10m", [])[idx] if idx < len(hly.get("wind_speed_10m", [])) else None
-            rh = hly.get("relative_humidity_2m", [])[idx] if idx < len(hly.get("relative_humidity_2m", [])) else None
 
-            coords = [
-                [round(lon - half_lon, 6), round(lat - half_lat, 6)],
-                [round(lon + half_lon, 6), round(lat - half_lat, 6)],
-                [round(lon + half_lon, 6), round(lat + half_lat, 6)],
-                [round(lon - half_lon, 6), round(lat + half_lat, 6)],
-                [round(lon - half_lon, 6), round(lat - half_lat, 6)],
-            ]
-            feats.append({
-                "type": "Feature",
-                "geometry": {"type": "Polygon", "coordinates": [coords]},
-                "properties": {
-                    "id": pt.get("id"),
-                    "lat": lat,
-                    "lon": lon,
-                    "hour": h_idx,
-                    "time": t_str,
-                    "value": temp,
-                    "temperature_2m": temp,
-                    "apparent_temperature": app_temp,
-                    "precipitation": precip,
-                    "cloud_cover": cloud,
-                    "wind_speed_10m": wind,
-                    "relative_humidity_2m": rh,
-                    "unit": unit,
-                    "status": "KNOWN" if temp is not None else "UNKNOWN",
-                    "acquisition_time": acq,
-                }
-            })
-
-        return {
-            "type": "FeatureCollection",
-            "layer_id": layer_id,
-            "hour": h_idx,
-            "metadata": {
-                "source": data.get("source"),
-                "model": data.get("model"),
-                "native_resolution": data.get("native_resolution"),
-                "units": data.get("units", {}),
-            },
-            "features": feats,
-        }
-
+@router.get("/layers/{layer_id}")
+def get_layer(layer_id: str, hour: Optional[int] = None):
+    if layer_id in ("weather", "weather_grid"):
+        return get_weather_layer(var="apparent_temperature", hour=hour)
+    elif layer_id in ("night_lights", "viirs_ntl"):
+        return get_night_lights_layer()
+    elif layer_id in ("thermal", "thermal_lst"):
+        return get_thermal_layer(source="night_surface", hour=hour)
     else:
-        raise HTTPException(404, f"Layer '{layer_id}' not recognized. Supported: viirs_ntl, thermal_lst, weather_grid.")
+        raise HTTPException(404, f"Layer '{layer_id}' not recognized. Supported: viirs_ntl, thermal_lst, weather_grid, weather, night_lights, thermal.")
 
 
 @router.get("/map/transit")

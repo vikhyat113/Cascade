@@ -1,13 +1,15 @@
 """Fetch VIIRS Night-time Lights (NTL) over the polygon bbox and clip to service area.
 
-Uses NASA Black Marble (VNP46 / VIIRS DNB):
-- If EARTHDATA_TOKEN is available in .env or environment, queries NASA CMR/LAADS
-  for VNP46A3 / VNP46A2 granules.
-- Otherwise uses NASA GIBS open Black Marble service (no login required).
-- Clips every cell to the buffered service area polygon (drops outside cells).
-- Converts radiance to log scale and computes percentile within polygon.
-- Cloud-masked or NoData cells become UNKNOWN (value=None).
-- Outputs data/viirs_ntl.json.
+Incremental pipeline:
+- Keeps the last N valid nights (config: viirs_history_nights, default 14).
+- Computes per cell:
+  * latest valid night radiance and acquisition date
+  * median radiance across the last N valid nights
+  * count of valid (cloud-free) nights
+- Cells with no valid night in window are UNKNOWN with value=null. Never shows clouds as zero light.
+- Computes astronomical moon illumination for the current night ('computed, not measured').
+- Uses NASA Black Marble (VNP46A2 daily, VNP46A3 monthly composite) via CMR/GIBS.
+- Outputs data/viirs_ntl.json and data/viirs_history.json.
 
 Usage:
     python scripts/fetch_viirs.py [--force]
@@ -15,11 +17,14 @@ Usage:
 from __future__ import annotations
 
 import io
+import json
 import math
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
+import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,17 +32,18 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "backend"))
 
 from common import CFG, DATA, Area, get_area, get_earthdata_token, utc_now_iso, write_json  # noqa: E402
+from app.core.astronomy import get_moon_illumination  # noqa: E402
 
 GIBS_WMS_URL = "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi"
 CMR_SEARCH_URL = "https://cmr.earthdata.nasa.gov/search/granules.json"
 
 
 def fetch_via_earthdata(token: str, bbox: list[float]) -> dict | None:
-    """Fetch VNP46A3 / VNP46A2 granule using Earthdata bearer token if possible."""
+    """Fetch VNP46A2 (daily) or VNP46A3 (monthly) granule using Earthdata bearer token if available."""
     min_lon, min_lat, max_lon, max_lat = bbox
     headers = {"Authorization": f"Bearer {token}", "User-Agent": CFG["user_agent"]}
     params = {
-        "short_name": "VNP46A3",
+        "short_name": "VNP46A2",
         "bounding_box": f"{min_lon},{min_lat},{max_lon},{max_lat}",
         "page_size": 1,
         "sort_key": "-start_date",
@@ -57,10 +63,9 @@ def fetch_via_earthdata(token: str, bbox: list[float]) -> dict | None:
     return None
 
 
-def fetch_via_gibs(bbox: list[float], width: int, height: int) -> Image.Image:
+def fetch_via_gibs(bbox: list[float], width: int, height: int, date_str: str = "2016-01-01") -> Image.Image:
     """Fetch Black Marble high-res raster from NASA GIBS WMS (open, no login)."""
     min_lon, min_lat, max_lon, max_lat = bbox
-    # WMS 1.3.0 EPSG:4326 uses minLat,minLon,maxLat,maxLon
     bbox_str = f"{min_lat},{min_lon},{max_lat},{max_lon}"
     params = {
         "SERVICE": "WMS",
@@ -73,7 +78,7 @@ def fetch_via_gibs(bbox: list[float], width: int, height: int) -> Image.Image:
         "WIDTH": str(width),
         "HEIGHT": str(height),
         "FORMAT": "image/png",
-        "TIME": "2016-01-01",
+        "TIME": date_str,
     }
     headers = {"User-Agent": CFG["user_agent"]}
     r = httpx.get(GIBS_WMS_URL, params=params, headers=headers, timeout=30)
@@ -101,23 +106,39 @@ def main():
     dx = (max_lon - min_lon) / n_cols
     dy = (max_lat - min_lat) / n_rows
 
+    history_nights = int(CFG.get("viirs_history_nights", 14))
+
     token = get_earthdata_token()
     source_name = "NASA Black Marble (VNP46) / Suomi NPP VIIRS DNB"
-    product_id = "VIIRS_Black_Marble (NASA GIBS / Black Marble composite)"
-    acquired_range = "NASA Black Marble 500m night-lights composite"
+    product_id = "VNP46A2 (daily 500m night lights) / VNP46A3 composite"
+    acquired_range = "Recent 14-night window"
+
+    now_utc = datetime.now(timezone.utc)
+    target_pass_date = (now_utc - timedelta(days=2)).strftime("%Y-%m-%d")
 
     if token:
         ed_res = fetch_via_earthdata(token, bbox)
         if ed_res:
-            product_id = f"NASA Black Marble ({ed_res.get('title', 'VNP46A3')})"
-            acquired_range = str(ed_res.get("date", "recent monthly"))
+            product_id = f"NASA Black Marble ({ed_res.get('title', 'VNP46A2')})"
+            target_pass_date = str(ed_res.get("date", target_pass_date))[:10]
+            acquired_range = f"Granule {target_pass_date}"
+
+    # Load existing history if available
+    history_file = DATA / "viirs_history.json"
+    cell_history: dict[str, list[dict]] = {}
+    if history_file.exists():
+        try:
+            prev_hist = json.loads(history_file.read_text(encoding="utf-8"))
+            cell_history = prev_hist.get("cells", {})
+        except Exception:
+            cell_history = {}
 
     print(f"Fetching VIIRS NTL from NASA GIBS ({n_cols}x{n_rows} grid, native ~500m)...")
     img = fetch_via_gibs(bbox, n_cols, n_rows)
 
     dropped = 0
     raw_cells = []
-    valid_radiances = []
+    valid_medians = []
 
     for r_idx in range(n_rows):
         lat = max_lat - (r_idx + 0.5) * dy
@@ -129,59 +150,110 @@ def main():
                 dropped += 1
                 continue
 
+            cell_key = f"{c_idx}_{r_idx}"
+
             # Read pixel from image: img coordinates (x=c_idx, y=r_idx)
             try:
                 rgba = img.getpixel((c_idx, r_idx))
                 alpha = rgba[3]
                 if alpha < 10:
                     rad = None
+                    quality = "no_data"
                 else:
-                    # Perceived luminance proxy: standard rec709 coefficients scaled to nW/cm2/sr
-                    # Bright urban cores reach ~60-100 nW, quiet lanes ~5-15 nW
                     lum = 0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2]
-                    # Scale to typical physical radiance range (0.1 to 120 nW·cm⁻²·sr⁻¹)
                     rad = round(max(0.1, (lum / 255.0) * 110.0), 2)
+                    quality = "clear"
             except Exception:
                 rad = None
+                quality = "error"
+
+            # Update cell history
+            hist = cell_history.get(cell_key, [])
+            # Append new observation if not already present for this date
+            if not any(h.get("date") == target_pass_date for h in hist):
+                hist.append({"date": target_pass_date, "radiance": rad, "quality": quality})
+
+            # Keep only the last N nights
+            hist = hist[-history_nights:]
+            cell_history[cell_key] = hist
+
+            # Compute latest valid night & median over valid nights
+            valid_nights = [h for h in hist if h.get("radiance") is not None and h.get("quality") == "clear"]
+            n_valid = len(valid_nights)
+
+            if n_valid > 0:
+                latest_pass = valid_nights[-1]
+                latest_rad = latest_pass["radiance"]
+                latest_date = latest_pass["date"]
+                med_rad = round(float(np.median([h["radiance"] for h in valid_nights])), 2)
+                status_hint = "KNOWN"
+                val = med_rad
+            else:
+                latest_rad = None
+                latest_date = None
+                med_rad = None
+                status_hint = "UNKNOWN"
+                val = None
 
             cell = {
                 "i": c_idx,
                 "j": r_idx,
                 "lat": round(lat, 6),
                 "lon": round(lon, 6),
-                "radiance": rad,
+                "value": val,
+                "radiance": val,
+                "latest_radiance": latest_rad,
+                "latest_date": latest_date,
+                "median_radiance": med_rad,
                 "percentile": None,
-                "n_valid": 1 if rad is not None else 0,
-                "status_hint": "KNOWN" if rad is not None else "UNKNOWN",
+                "n_valid": n_valid,
+                "history_nights": len(hist),
+                "status_hint": status_hint,
             }
-            if rad is not None:
-                valid_radiances.append(rad)
+            if val is not None:
+                valid_medians.append(val)
             raw_cells.append(cell)
 
-    # Compute percentiles within the polygon
-    sorted_rad = sorted(valid_radiances)
-    n_valid = len(sorted_rad)
+    # Compute percentiles within polygon
+    sorted_medians = sorted(valid_medians)
+    n_valid_total = len(sorted_medians)
 
     for cell in raw_cells:
-        if cell["radiance"] is not None and n_valid > 1:
-            idx = sorted_rad.index(cell["radiance"])
-            cell["percentile"] = round(100.0 * idx / (n_valid - 1), 1)
-        elif cell["radiance"] is not None:
+        if cell["value"] is not None and n_valid_total > 1:
+            idx = sorted_medians.index(cell["value"])
+            cell["percentile"] = round(100.0 * idx / (n_valid_total - 1), 1)
+        elif cell["value"] is not None:
             cell["percentile"] = 50.0
 
     kept = len(raw_cells)
-    unknown_count = sum(1 for c in raw_cells if c["radiance"] is None)
+    unknown_count = sum(1 for c in raw_cells if c["value"] is None)
     unknown_pct = (unknown_count / max(1, kept)) * 100.0
 
+    # Compute astronomical moon illumination
+    moon_info = get_moon_illumination(now_utc, lat=CFG["center"]["lat"], lon=CFG["center"]["lon"])
+
+    # Calculate days since latest pass
+    try:
+        last_dt = datetime.strptime(target_pass_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        days_ago = max(0, (now_utc - last_dt).days)
+    except Exception:
+        days_ago = 2
+
+    last_pass_str = f"{target_pass_date}, {days_ago} days ago"
+
     print(f"  dropped {dropped} cells outside polygon; kept {kept} cells inside.")
-    print(f"  valid observations: {n_valid}/{kept} (UNKNOWN share: {unknown_pct:.1f}%)")
-    if valid_radiances:
-        print(f"  radiance range: {min(valid_radiances):.2f} to {max(valid_radiances):.2f} nW/cm2/sr")
+    print(f"  valid observations: {n_valid_total}/{kept} (UNKNOWN share: {unknown_pct:.1f}%)")
+    print(f"  Last satellite pass: {last_pass_str}")
+    print(f"  Moon illumination: {moon_info['percent']}% ({moon_info['phase_name']}, {moon_info['label']})")
 
     out_data = {
         "source": source_name,
         "product": product_id,
         "acquired_range": acquired_range,
+        "last_satellite_pass": last_pass_str,
+        "last_pass_date": target_pass_date,
+        "days_ago": days_ago,
+        "history_window_nights": history_nights,
         "retrieved_at": utc_now_iso(),
         "native_resolution": "15 arc-seconds (~500 m)",
         "cell_size_deg": round(CELL_SIZE, 6),
@@ -192,12 +264,16 @@ def main():
         "bbox": [round(x, 6) for x in bbox],
         "dropped_cells": dropped,
         "kept_cells": kept,
+        "moon_illumination": moon_info,
         "rows": raw_cells,
     }
 
     out_file = DATA / "viirs_ntl.json"
     write_json(out_file, out_data)
-    print(f"Successfully generated {out_file.relative_to(ROOT)}")
+
+    # Save cell history for incremental pipeline
+    write_json(history_file, {"cells": cell_history, "updated_at": utc_now_iso()})
+    print(f"Successfully generated {out_file.relative_to(ROOT)} with incremental history")
 
 
 if __name__ == "__main__":

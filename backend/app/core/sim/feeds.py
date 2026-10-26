@@ -123,6 +123,8 @@ class FeedSimulator:
                              {"delay_s": int(round(delay)), "cancelled": bool(cancelled), "route": trip.route_id}, obs))
 
     def _emit_weather_live(self, src, obs, now):
+        if getattr(self.state.static, "live_weather", False):
+            return  # Live weather is ON: do not emit simulated observations (no double counting)
         s, st, tr = self.state, self.state.static, self.state.truth
         row = st.weather.at(now) or {}
         rc = tr.rain

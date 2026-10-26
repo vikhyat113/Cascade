@@ -11,7 +11,8 @@ import { OpenNow } from "./screens/OpenNow";
 import { Result } from "./screens/Result";
 import { Search } from "./screens/Search";
 import { HelpSheet, Trip } from "./screens/Trip";
-import type { AppConfig, AreaDiagnostics, LatLon, LayerMeta, Place, PlaceOnWay, SimpleView } from "./types";
+import { CompareRoutesSheet } from "./components/CompareRoutesSheet";
+import type { AppConfig, AreaDiagnostics, LatLon, LayerMeta, Place, PlaceOnWay, RouteItem, SimpleView } from "./types";
 
 // Judges only: code-split, never in the first download (UI_SPEC §1.9, §5).
 const DemoDrawer = lazy(() => import("./demo/DemoDrawer"));
@@ -28,6 +29,25 @@ export default function App() {
   return <Main />;
 }
 
+function getSavedViewMode(layer: string, fallback: "streets" | "smooth" | "cells"): "streets" | "smooth" | "cells" {
+  try {
+    const val = localStorage.getItem(`nw_view_mode_${layer}`);
+    if (val === "streets" || val === "smooth" || val === "cells") return val;
+  } catch {}
+  return fallback;
+}
+
+function getSavedOpacity(layer: string, fallback: number): number {
+  try {
+    const val = localStorage.getItem(`nw_opacity_${layer}`);
+    if (val !== null) {
+      const num = parseFloat(val);
+      if (!isNaN(num) && num >= 0.1 && num <= 1.0) return num;
+    }
+  } catch {}
+  return fallback;
+}
+
 function Main() {
   const { t, lang } = useT();
   const [cfg, setCfg] = useState<AppConfig | null>(null);
@@ -35,6 +55,7 @@ function Main() {
   const [showCoverage, setShowCoverage] = useState(true);
   const [showDataCoverage, setShowDataCoverage] = useState(false);
   const [layersMeta, setLayersMeta] = useState<LayerMeta[]>([]);
+  const [layerVersion, setLayerVersion] = useState(0);
   const [facilityCounts, setFacilityCounts] = useState<FacilityCounts>({
     medicine: 0,
     food: 0,
@@ -53,18 +74,25 @@ function Main() {
     },
     viirs: {
       enabled: false,
-      opacity: 0.75,
+      opacity: getSavedOpacity("viirs", 0.75),
+      mode: getSavedViewMode("viirs", "streets"),
+      live: false,
     },
     thermal: {
       enabled: false,
-      opacity: 0.75,
+      opacity: getSavedOpacity("thermal", 0.75),
       source: "night_surface",
+      mode: getSavedViewMode("thermal", "cells"),
+      hour: 2,
+      followClock: true,
     },
     weather: {
       enabled: false,
-      opacity: 0.75,
+      opacity: getSavedOpacity("weather", 0.75),
+      mode: getSavedViewMode("weather", "cells"),
       hour: 2,
       followClock: true,
+      live: false,
     },
   });
   const [from, setFrom] = useState<Place | null>(null);
@@ -87,12 +115,32 @@ function Main() {
   const [sheetH, setSheetH] = useState(380);
   const [bannerId, setBannerId] = useState<string | null>(null);
   const [demoOpen, setDemoOpen] = useState(false);
+  const [routes, setRoutes] = useState<RouteItem[]>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
+  const [showDominatedRoutes, setShowDominatedRoutes] = useState(false);
   const seen = useRef(new Set<string>());
   const conn = useConnection(view?.connection ?? null);
 
   useEffect(() => {
     setShowCoverage(layerState.showCoverage);
   }, [layerState.showCoverage]);
+
+  // ---- multi-route alternatives for active plan ------------------------------------------------
+  useEffect(() => {
+    if (!view?.id) {
+      setRoutes([]);
+      setSelectedRouteId(null);
+      return;
+    }
+    api.planRoutes(view.id)
+      .then((res) => {
+        setRoutes(res.routes || []);
+        const rec = res.routes?.find((r) => r.recommended);
+        if (rec) setSelectedRouteId((curr) => curr || rec.id);
+      })
+      .catch(() => {});
+  }, [view?.id]);
 
   // ---- boot --------------------------------------------------------------------------------
   useEffect(() => {
@@ -135,6 +183,21 @@ function Main() {
     };
     return () => { es.close(); if (poll) window.clearInterval(poll); };
   }, [view?.id, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- live layer updates: SSE -------------------------------------------------------------
+  useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource("/api/layers/stream");
+      es.addEventListener("layer_update", () => {
+        api.layers().then(setLayersMeta).catch(() => {});
+        setLayerVersion((v) => v + 1);
+      });
+    } catch {}
+    return () => {
+      es?.close();
+    };
+  }, []);
 
   // ---- one banner at a time, each shown once ---------------------------------------------------
   useEffect(() => {
@@ -199,6 +262,9 @@ function Main() {
     if (view?.id) api.drop(view.id);
     rememberTrip(null);
     setView(null);
+    setRoutes([]);
+    setSelectedRouteId(null);
+    setShowCompare(false);
     setScreen("home");
   };
 
@@ -318,6 +384,15 @@ function Main() {
         onFacilityCounts={setFacilityCounts}
         bottomPad={sheetH}
         offline={conn === "offline"}
+        layerVersion={layerVersion}
+        routes={screen === "result" ? routes : undefined}
+        selectedRouteId={selectedRouteId ?? undefined}
+        onSelectRoute={(id) => {
+          setSelectedRouteId(id);
+          const opt = options.find((o) => o.id === id);
+          if (opt) setShownId(opt.id);
+        }}
+        showDominated={showDominatedRoutes}
         {...mapView}
         onPick={screen === "pick" ? async (lat, lon) => {
           if (cfg && !isInsideCoverage(lat, lon, cfg)) {
@@ -336,6 +411,12 @@ function Main() {
         onChange={setLayerState}
         counts={facilityCounts}
         simHour={2}
+        originLat={from?.lat ?? cfg.center.lat}
+        originLon={from?.lon ?? cfg.center.lon}
+        onRefreshMeta={() => {
+          api.layers().then(setLayersMeta).catch(() => {});
+          setLayerVersion((v) => v + 1);
+        }}
       />
 
       {/* Coverage legend toggle & Area label pill */}
@@ -418,8 +499,37 @@ function Main() {
         </div>
       )}
       {screen === "result" && shown && (
-        <Result options={options} shown={shown} onTab={setShownId} onBackup={onBackup} onStart={start} starting={starting}
-          onBack={() => setScreen("home")} showPlaces={showPlaces} setShowPlaces={setShowPlaces} onHeight={setSheetH} {...demo} />
+        <Result
+          options={options}
+          shown={shown}
+          onTab={(id) => {
+            setShownId(id);
+            setSelectedRouteId(id);
+          }}
+          onBackup={onBackup}
+          onStart={start}
+          starting={starting}
+          onBack={() => setScreen("home")}
+          showPlaces={showPlaces}
+          setShowPlaces={setShowPlaces}
+          onHeight={setSheetH}
+          onCompare={() => setShowCompare(true)}
+          {...demo}
+        />
+      )}
+      {showCompare && view && routes.length > 0 && (
+        <CompareRoutesSheet
+          routes={routes}
+          selectedId={selectedRouteId}
+          onSelect={(id: string) => {
+            setSelectedRouteId(id);
+            const opt = options.find((o) => o.id === id);
+            if (opt) setShownId(opt.id);
+          }}
+          onClose={() => setShowCompare(false)}
+          showDominated={showDominatedRoutes}
+          onToggleDominated={setShowDominatedRoutes}
+        />
       )}
       {screen === "trip" && current && (
         <Trip option={current} trip={view?.trip ?? null} onEnd={endTrip} onBackup={onBackup} onHeight={setSheetH} {...demo}

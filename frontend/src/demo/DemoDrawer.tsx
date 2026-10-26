@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
-import type { AreaDiagnostics, LayerMeta, SimpleView } from "../types";
+import type { AreaDiagnostics, LayerMeta, PlanRoutesResponse, SimpleView } from "../types";
 import { ago, demo, OFFICIAL, type SimState, type Source, type Status } from "./demoApi";
 import { ScenariosTable } from "./ScenariosTable";
 
@@ -11,16 +11,20 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
   const [sources, setSources] = useState<Source[]>([]);
   const [areaDiag, setAreaDiag] = useState<AreaDiagnostics | null>(null);
   const [layersList, setLayersList] = useState<LayerMeta[]>([]);
+  const [routesData, setRoutesData] = useState<PlanRoutesResponse | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [time, setTime] = useState("");
-  const [open, setOpen] = useState<Record<string, boolean>>({ break: true, happen: true, time: true, area: true, layers: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({ break: true, happen: true, time: true, area: true, layers: true, multiroute: true });
 
   const refresh = useCallback(() => {
     demo.sim().then(setSim).catch(() => {});
     demo.trust().then((t) => setSources(t.sources)).catch(() => {});
     demo.area().then(setAreaDiag).catch(() => {});
     api.layers().then(setLayersList).catch(() => {});
-  }, []);
+    if (view?.id) {
+      api.planRoutes(view.id).then(setRoutesData).catch(() => {});
+    }
+  }, [view?.id]);
   useEffect(() => { refresh(); const id = window.setInterval(refresh, 2000); return () => window.clearInterval(id); }, [refresh]);
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
@@ -218,11 +222,21 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
           )}
         </Section>
 
-        <Section id="layers" title="7. Data Layers (Polygon-Clipped)">
+        <Section id="layers" title="7. Data Layers (Polygon-Clipped & Live)">
           <div className="space-y-3">
             {layersList.map((layer) => {
-              const statusCfg = OFFICIAL[layer.status] || OFFICIAL.UNKNOWN;
-              const isStaleOrMissing = !layer.available || layer.older_than_area;
+              const chip = layer.status_chip || "CACHED";
+              let chipColor = "#38bdf8";
+              if (chip === "LIVE") chipColor = "#34d399";
+              else if (chip === "STALE") chipColor = "#fbbf24";
+              else if (chip === "OFFLINE") chipColor = "#f87171";
+
+              // Check if older than TTL
+              // Weather TTL = 15m (live) / 24h (forecast). Thermal TTL = 3 days. VIIRS TTL = 45 days.
+              const ttlS = layer.id === "weather_grid" ? 86400 : layer.id === "thermal_lst" ? 259200 : 3888000;
+              const isOlderThanTtl = (layer.age_s ?? 0) > ttlS;
+              const isMissingOrStale = !layer.available || layer.older_than_area || isOlderThanTtl;
+
               return (
                 <div key={layer.id} className="rounded-xl border border-edge bg-raised p-3 text-[0.85rem]">
                   <div className="flex items-center justify-between">
@@ -230,26 +244,37 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
                     <div className="flex items-center gap-1.5">
                       <span
                         className="rounded-md px-2 py-0.5 text-[0.75rem] font-bold"
-                        style={{ backgroundColor: `${statusCfg.color}22`, color: statusCfg.color }}
+                        style={{ backgroundColor: `${chipColor}22`, color: chipColor, border: `1px solid ${chipColor}44` }}
                       >
-                        {statusCfg.word}
+                        {chip}
                       </span>
                       <span className="font-mono text-[0.78rem] text-soft">{ago(layer.age_s)}</span>
                     </div>
                   </div>
 
-                  <div className="mt-1.5 text-[0.8rem] text-soft">
+                  <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[0.8rem] text-soft">
+                    <div>Live flag: <span className={layer.live ? "text-good font-semibold" : "text-soft"}>{layer.live ? "ON" : "OFF"}</span></div>
+                    <div>Status: <span className="text-ink font-semibold">{layer.status}</span></div>
                     <div>Source: <span className="text-ink">{layer.source}</span></div>
-                    {layer.product && <div>Product: <span className="text-ink">{layer.product}</span></div>}
                     <div>Resolution: <span className="text-ink">{layer.native_resolution}</span></div>
+                    <div>Last fetch / retrieved: <span className="font-mono text-ink text-[0.75rem]">{layer.retrieved_at ? layer.retrieved_at.slice(0, 19) + "Z" : "N/A"}</span></div>
+                    <div>Newest timestamp: <span className="font-mono text-ink text-[0.75rem]">{layer.last_pass_date || (layer.retrieved_at ? layer.retrieved_at.slice(0, 10) : "N/A")}</span></div>
                     <div>Inside polygon: <span className="text-ink font-semibold">{layer.cell_count} cells</span></div>
-                    <div>Missing share: <span className="text-good font-semibold">{layer.unknown_share}%</span></div>
+                    <div>UNKNOWN share: <span className="text-good font-semibold">{layer.unknown_share}%</span></div>
                   </div>
 
-                  {isStaleOrMissing && (
+                  {layer.error && (
+                    <div className="mt-2 rounded-lg bg-bad/20 border border-bad/50 p-2 text-[0.8rem] font-semibold text-bad">
+                      Error: {layer.error}
+                    </div>
+                  )}
+
+                  {isMissingOrStale && (
                     <div className="mt-2 rounded-lg bg-bad/20 border border-bad/50 p-2 text-[0.8rem] font-semibold text-bad">
                       {!layer.available
-                        ? "⚠ Layer file missing or failed to fetch (layer disabled)"
+                        ? "⚠ Red Warning: Layer file missing from data/ directory!"
+                        : isOlderThanTtl
+                        ? `⚠ Red Warning: Layer file is older than its TTL (${Math.round(ttlS / 3600)}h)!`
                         : "⚠ Warning: Layer file is older than area.geojson!"}
                     </div>
                   )}
@@ -268,6 +293,86 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
               </li>
             ))}
           </ol>
+        </Section>
+
+        <Section id="multiroute" title="9. Multi-Route Engine & Evaluation">
+          {!view?.id ? (
+            <p className="text-soft text-[0.9rem]">Find a way first to see multi-route Yen paths and evaluation breakdown.</p>
+          ) : !routesData ? (
+            <p className="text-soft text-[0.9rem]">Loading routes...</p>
+          ) : (
+            <div className="space-y-3 text-[0.88rem]">
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-raised p-3 text-[0.82rem]">
+                <div>Base Search: <span className="font-semibold text-ink">Dijkstra (Safety-aware cost)</span></div>
+                <div>Alternative Engine: <span className="font-semibold text-ink">Yen's K-Shortest Loopless Paths</span></div>
+                <div>Parameters: <span className="font-semibold text-ink">K=8 (max 12), Budget=1.5s, Buffer=1.5km</span></div>
+                <div>Diversity Filter: <span className="font-semibold text-ink">Overlap ≤ 70%, Cost ratio ≤ 1.6</span></div>
+                <div>Execution Time: <span className="font-mono font-semibold text-good">{routesData.routing_time_ms ? `${routesData.routing_time_ms.toFixed(1)} ms` : "N/A"}</span></div>
+                <div>Diverse Routes Kept: <span className="font-semibold text-ink">{routesData.routes.length}</span></div>
+                <div className="col-span-2">
+                  Decision Status:{" "}
+                  <span className={routesData.tie ? "font-semibold text-warn" : "font-semibold text-good"}>
+                    {routesData.tie ? `Close Choice / Honest Tie: ${routesData.tie_note || "Safety intervals overlap > 70%"}` : "Clear Winner Recommended"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-bold text-ink">Candidate Routes & Score Breakdown:</h4>
+                {routesData.routes.map((r) => (
+                  <div
+                    key={r.id}
+                    className={`rounded-xl border p-3 ${
+                      r.recommended
+                        ? "border-accent/60 bg-accent/10"
+                        : r.dominated
+                        ? "border-edge/50 bg-raised/30 opacity-70"
+                        : "border-edge bg-raised"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-ink">{r.label} ({r.id})</span>
+                        {r.recommended && (
+                          <span className="rounded-md bg-accent px-2 py-0.5 text-[0.72rem] font-bold text-night">
+                            RECOMMENDED
+                          </span>
+                        )}
+                        {r.dominated && (
+                          <span className="rounded-md bg-bad/20 text-bad border border-bad/40 px-2 py-0.5 text-[0.72rem] font-bold">
+                            PARETO DOMINATED
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-mono font-bold text-accent">
+                        Score: {r.score.toFixed(3)}
+                      </span>
+                    </div>
+
+                    <p className="mt-1 text-[0.8rem] text-soft italic">"{r.why}"</p>
+
+                    <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[0.78rem] text-soft border-t border-edge/60 pt-2">
+                      <div>
+                        Safety (wt 0.40): <span className="text-ink font-mono">[{Math.round(r.metrics.safety.lo * 100)}%, {Math.round(r.metrics.safety.hi * 100)}%]</span> (sub-score: {r.score_breakdown?.worst_case_safety?.toFixed(2) ?? "N/A"})
+                      </div>
+                      <div>
+                        Deadline Slack (wt 0.25): <span className="text-ink font-mono">{r.metrics.slack_min}m</span> (sub-score: {r.score_breakdown?.deadline_slack?.toFixed(2) ?? "N/A"})
+                      </div>
+                      <div>
+                        Outdoor Exposure (wt 0.15): <span className="text-ink font-mono">{r.metrics.outdoor_min}m</span> (sub-score: {r.score_breakdown?.outdoor_exposure?.toFixed(2) ?? "N/A"})
+                      </div>
+                      <div>
+                        Unlit Share (wt 0.10): <span className="text-ink font-mono">{Math.round(r.metrics.unknown_lighting_share * 100)}%</span> (sub-score: {r.score_breakdown?.unknown_share?.toFixed(2) ?? "N/A"})
+                      </div>
+                      <div className="col-span-2">
+                        Safe Haven Proximity (wt 0.10): <span className="text-ink font-mono">{r.metrics.safe_haven_dist_m}m</span> (sub-score: {r.score_breakdown?.safe_haven_proximity?.toFixed(2) ?? "N/A"})
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Section>
       </div>
     </div>

@@ -10,3 +10,4 @@ tzdata>=2024.1      # IANA time zones on Windows
 shapely>=2.0
 # Tests
 pytest>=8.0
+ephem>=4.2

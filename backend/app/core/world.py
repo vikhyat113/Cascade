@@ -177,6 +177,7 @@ class StaticWorld:
         self.source_cfg: dict = cfg["sources"]
         self.risk_cfg: dict = cfg["risk"]
         self.planner_cfg: dict = cfg["planner"]
+        self.routing_cfg: dict = cfg.get("routing", {})
         load_now = datetime.now(timezone.utc)
 
         walk_p, drive_p = data_path / "graph_walk.json.gz", data_path / "graph_drive.json.gz"
@@ -228,6 +229,22 @@ class StaticWorld:
 
         self.weather_grid_data = _read_data_json("weather_grid.json")
         self.weather_grid_observed_at = _ts(self.weather_grid_data.get("retrieved_at")) if self.weather_grid_data else None
+
+        self.live_weather = bool(cfg.get("live_weather", False))
+        self.live_satellite = bool(cfg.get("live_satellite", False))
+        self.live_weather_interval_min = int(cfg.get("live_weather_interval_min", 15))
+        self.viirs_history_nights = int(cfg.get("viirs_history_nights", 14))
+
+        from ..adapters.weather_live import WeatherLiveAdapter
+        self.weather_live_adapter = WeatherLiveAdapter(
+            data_path, self.tz, self.cfg.get("user_agent", "NightWay"),
+            interval_min=self.live_weather_interval_min,
+            live_enabled=self.live_weather,
+        )
+        if self.weather_live_adapter.grid_data:
+            self.weather_grid_data = self.weather_live_adapter.grid_data
+            if self.weather_live_adapter.last_fetch:
+                self.weather_grid_observed_at = self.weather_live_adapter.last_fetch
 
         viirs_tree = None
         viirs_percentiles = None

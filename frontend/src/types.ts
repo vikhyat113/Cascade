@@ -81,6 +81,26 @@ export interface AreaDiagnostics {
 }
 
 export type StatusTier = "KNOWN" | "PROBABLE" | "OUTDATED" | "UNKNOWN";
+export type StatusChip = "LIVE" | "CACHED" | "STALE" | "OFFLINE";
+export type ViewMode = "streets" | "smooth" | "cells";
+
+export interface MoonIllumination {
+  fraction: number;
+  percent: number;
+  phase_name: string;
+  altitude_deg?: number;
+  azimuth_deg?: number;
+  label: string;
+  computed_not_measured?: boolean;
+}
+
+export interface OriginForecastPoint {
+  hour: number;
+  time: string;
+  temperature_2m: number | null;
+  apparent_temperature: number | null;
+  precipitation?: number;
+}
 
 export interface LayerMeta {
   id: string;
@@ -94,15 +114,23 @@ export interface LayerMeta {
   license: string;
   attribution: string;
   status: StatusTier;
+  status_chip?: StatusChip;
   confidence: number;
   age_s: number | null;
   available: boolean;
   cell_count: number;
   unknown_share: number;
   synthetic: boolean;
+  live?: boolean;
   note: string;
   error?: string;
   older_than_area?: boolean;
+  moon_illumination?: MoonIllumination;
+  last_satellite_pass?: string;
+  last_pass_date?: string;
+  days_ago?: number;
+  history_window_nights?: number;
+  microclimate_note?: string;
 }
 
 export type FacilityCategory = "medicine" | "food" | "hospital" | "police";
@@ -128,5 +156,45 @@ export interface FacilityPOI {
   dist_m?: number;
   walk_min?: number;
 }
+
+export type RouteMetrics = {
+  eta: { best: string | null; expected: string | null; worst: string | null };
+  duration_min: { best: number | null; expected: number | null; worst: number | null };
+  safety: { lo: number; hi: number };
+  safety_status: string;
+  outdoor_min: number;
+  unknown_lighting_share: number;
+  safe_haven_dist_m: number;
+  distance_m: number;
+  feasible: { best: boolean; expected: boolean; worst: boolean };
+  slack_min: number;
+  limiting_label: string;
+  limiting_status: string;
+};
+
+export type RouteItem = {
+  id: string;
+  index: number;
+  label: string;
+  kind: string;
+  title: string;
+  polyline: [number, number][];
+  metrics: RouteMetrics;
+  dominated: boolean;
+  infeasible_worst: boolean;
+  score: number;
+  score_breakdown: Record<string, number>;
+  why: string;
+  loss_reason: string;
+  recommended: boolean;
+};
+
+export type PlanRoutesResponse = {
+  plan_id: string;
+  routes: RouteItem[];
+  tie: boolean;
+  tie_note: string | null;
+  routing_time_ms: number;
+};
 
 

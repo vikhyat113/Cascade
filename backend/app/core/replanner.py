@@ -42,6 +42,7 @@ class ActivePlan:
     last_access: float = field(default_factory=time.monotonic)
     history: list = field(default_factory=list)       # (t, confidence, safety_lo) for charts
     specs: dict = field(default_factory=dict)         # plan id -> RouteSpec from the last re-plan
+    routes: list = field(default_factory=list)        # multi-route diverse alternatives with metrics
     user_locked: bool = False                         # the user picked this way: only switch if it breaks
 
 
@@ -185,6 +186,7 @@ class Replanner:
         ps["user_locked"] = ap.user_locked
         ps["change_log"] = ap.log[-80:]
         ps["history"] = ap.history
+        ap.routes = ps.get("routes", [])
         ap.planset = ps
         ap.version += 1
         return ap.log[start_len:]

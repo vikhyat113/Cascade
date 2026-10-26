@@ -45,6 +45,19 @@ class Engine:
     # ---- time -------------------------------------------------------------------------------
     def _step(self, dt: float) -> None:
         self.feeds.tick(dt)
+        if getattr(self.static, "live_weather", False) and getattr(self.static, "weather_live_adapter", None) is not None:
+            now = self.clock.now()
+            if self.static.weather_live_adapter.should_poll(now):
+                try:
+                    ok = self.static.weather_live_adapter.poll(now)
+                    if ok:
+                        self.state.put_many(self.static.weather_live_adapter.build_facts(now))
+                        from ..api.routes import broadcast_layer_update
+                        broadcast_layer_update({"layer": "weather", "action": "poll"})
+                except Exception as e:
+                    self.state.log_event("source", f"Weather live poll error: {e}", "warn")
+
+
         for sid, old, new in self.state.record_source_history():
             src = self.state.sources[sid]
             v = self.state.source_view(sid)

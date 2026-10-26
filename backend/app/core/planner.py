@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
@@ -21,6 +22,7 @@ from .facts import STATUS_RANK, Fact, FactView, weakest
 from .freshness import coverage_status, status_shares
 from .risk import (COMPONENTS, CI, EdgeRisk, combine, edge_cost_risk, edge_risk, path_components,
                    round_time)
+from .routing import compute_edge_cost, evaluate_candidate_routes, yen_k_shortest_loopless_paths
 from .services import OpenCache, poi_view, safe_havens_near
 from .world import CODE, STATUS_OF
 
@@ -48,6 +50,8 @@ class Prefs(BaseModel):
     risk_weight: float = Field(0.7, ge=0.0, le=1.0)      # 0 = fastest, 1 = safest
     modes: list[str] = Field(default_factory=lambda: ["walk", "bus", "cab"])
     max_walk_m: float = 2500
+    lambda_val: Optional[float] = None
+    u: Optional[float] = None
 
 
 class PlanRequest(BaseModel):
@@ -109,6 +113,7 @@ class Ctx:
         self.cache = cache
         self.t0 = departure
         self.cfg = self.st.planner_cfg
+        self.routing_cfg = getattr(self.st, "routing_cfg", {})
         self.weights = dict(self.st.risk_cfg["weights"])
         self.speeds = self.cfg["walk_speed_mps"]
         self._er: dict = {}
@@ -146,30 +151,61 @@ def _overlap(a: RouteSpec, b: RouteSpec, st) -> float:
     return shared / max(sum(ea.values()), sum(eb.values()))
 
 
+_YEN_CACHE: dict = {}
+
+
 def walk_candidates(ctx: Ctx) -> list[RouteSpec]:
     st = ctx.st
     G = st.walk
     o, od = G.nearest_node(ctx.req.origin.lat, ctx.req.origin.lon)
     d, dd = G.nearest_node(ctx.req.destination.lat, ctx.req.destination.lon)
     er = ctx.er("walk", ctx.t0)
+
+    rcfg = getattr(ctx, "routing_cfg", {})
+    lam = ctx.req.prefs.lambda_val if getattr(ctx.req.prefs, "lambda_val", None) is not None else (ctx.req.prefs.risk_weight * 2.0)
+    u = ctx.req.prefs.u if getattr(ctx.req.prefs, "u", None) is not None else float(rcfg.get("u", 0.5))
+    k_exp = float(rcfg.get("k_exposure", ctx.cfg.get("risk_cost_s_per_m", 0.8)))
+
+    # 1. Multi-route engine: Yen's K-shortest paths under safety-aware cost
+    cost = compute_edge_cost(G, "walk", er, ctx.weights, ctx.speeds, lam, u, k_exp)
+    blocked_tuple = tuple(int(e) for e in np.where(er.blocked)[0]) if er.blocked is not None and er.blocked.any() else ()
+    cache_key = ("walk", getattr(G, "generated_at", None), o, d, round_time(ctx.t0, 15),
+                 round(lam, 2), round(u, 2), blocked_tuple)
+
+    if cache_key in _YEN_CACHE:
+        kept_paths = _YEN_CACHE[cache_key]
+    else:
+        k_paths = int(rcfg.get("k_paths", 8))
+        max_k = int(rcfg.get("max_k_paths", 12))
+        t_budget = float(rcfg.get("time_budget_s", 1.5))
+        c_buff = float(rcfg.get("corridor_buffer_m", 1500.0))
+        ov_max = float(rcfg.get("overlap_max", 0.7))
+        c_ratio = float(rcfg.get("cost_ratio_max", 1.6))
+        div_n = int(rcfg.get("diverse_n", 4))
+
+        kept_paths, _, _, _ = yen_k_shortest_loopless_paths(
+            G, o, d, cost, er.blocked, K=k_paths, max_K=max_k,
+            time_budget_s=t_budget, corridor_buffer_m=c_buff,
+            overlap_max=ov_max, cost_ratio_max=c_ratio, diverse_n=div_n
+        )
+        if len(_YEN_CACHE) > 120:
+            _YEN_CACHE.clear()
+        _YEN_CACHE[cache_key] = kept_paths
+
+    out = []
+    for _, path, _ in kept_paths:
+        out.append(RouteSpec("walk", [Leg("walk", "walk", path, _pt(ctx.req.origin), _pt(ctx.req.destination),
+                                          connector_m=od + dd)], lam))
+
+    # Baseline lambda paths for scenario continuity and extreme preferences (e.g. 0 = pure fastest, 4 = pure safest)
     risk = edge_cost_risk(er, ctx.weights)
     base = G.elen / ctx.speeds["expected"]
     K = ctx.cfg["risk_cost_s_per_m"]
-    out = []
-    for lam in ctx.cfg["lambdas"]:
-        path = G.shortest_path(o, d, base + lam * K * G.elen * risk, er.blocked)
-        if path is None:
-            continue
-        out.append(RouteSpec("walk", [Leg("walk", "walk", path, _pt(ctx.req.origin), _pt(ctx.req.destination),
-                                          connector_m=od + dd)], lam))
-    if out:   # one diversified alternative: penalise the balanced path
-        ref = out[min(2, len(out) - 1)]
-        pen = np.ones(G.m)
-        pen[[e for e, _ in ref.legs[0].edges]] = 1.6
-        path = G.shortest_path(o, d, (base + K * G.elen * risk) * pen, er.blocked)
-        if path:
-            out.append(RouteSpec("walk", [Leg("walk", "walk", path, _pt(ctx.req.origin),
-                                              _pt(ctx.req.destination), connector_m=od + dd)], 1.0))
+    for l_val in ctx.cfg["lambdas"]:
+        path = G.shortest_path(o, d, base + l_val * K * G.elen * risk, er.blocked)
+        if path is not None:
+            out.append(RouteSpec("walk", [Leg("walk", "walk", path, _pt(ctx.req.origin), _pt(ctx.req.destination),
+                                              connector_m=od + dd)], l_val))
     return out
 
 
@@ -180,13 +216,48 @@ def cab_candidates(ctx: Ctx) -> list[RouteSpec]:
     d, dd = G.nearest_node(ctx.req.destination.lat, ctx.req.destination.lon)
     er = ctx.er("drive", ctx.t0)
     dt = er.drive
-    risk = edge_cost_risk(er, ctx.weights)
+
+    rcfg = getattr(ctx, "routing_cfg", {})
+    lam = ctx.req.prefs.lambda_val if getattr(ctx.req.prefs, "lambda_val", None) is not None else (ctx.req.prefs.risk_weight * 2.0)
+    u = ctx.req.prefs.u if getattr(ctx.req.prefs, "u", None) is not None else float(rcfg.get("u", 0.5))
+    k_exp = float(rcfg.get("k_exposure", 0.8))
+
+    cost = compute_edge_cost(G, "drive", er, ctx.weights, ctx.speeds, lam, u, k_exp)
+    blocked_tuple = tuple(int(e) for e in np.where(er.blocked)[0]) if er.blocked is not None and er.blocked.any() else ()
+    cache_key = ("drive", getattr(G, "generated_at", None), o, d, round_time(ctx.t0, 15),
+                 round(lam, 2), round(u, 2), blocked_tuple)
+
+    if cache_key in _YEN_CACHE:
+        kept_paths = _YEN_CACHE[cache_key]
+    else:
+        k_paths = int(rcfg.get("k_paths", 8))
+        max_k = int(rcfg.get("max_k_paths", 12))
+        t_budget = float(rcfg.get("time_budget_s", 1.5))
+        c_buff = float(rcfg.get("corridor_buffer_m", 1500.0))
+        ov_max = float(rcfg.get("overlap_max", 0.7))
+        c_ratio = float(rcfg.get("cost_ratio_max", 1.6))
+        div_n = int(rcfg.get("diverse_n", 4))
+
+        kept_paths, _, _, _ = yen_k_shortest_loopless_paths(
+            G, o, d, cost, er.blocked, K=k_paths, max_K=max_k,
+            time_budget_s=t_budget, corridor_buffer_m=c_buff,
+            overlap_max=ov_max, cost_ratio_max=c_ratio, diverse_n=div_n
+        )
+        if len(_YEN_CACHE) > 120:
+            _YEN_CACHE.clear()
+        _YEN_CACHE[cache_key] = kept_paths
+
     out = []
-    for lam in (0.0, 1.0):
-        path = G.shortest_path(o, d, dt.exp + lam * 0.3 * G.elen * risk, er.blocked)
+    for _, path, _ in kept_paths:
+        out.append(RouteSpec("cab", [Leg("cab", "drive", path, _pt(ctx.req.origin), _pt(ctx.req.destination),
+                                         connector_m=od + dd)], lam))
+
+    risk = edge_cost_risk(er, ctx.weights)
+    for l_val in (0.0, 1.0):
+        path = G.shortest_path(o, d, dt.exp + l_val * 0.3 * G.elen * risk, er.blocked)
         if path:
             out.append(RouteSpec("cab", [Leg("cab", "drive", path, _pt(ctx.req.origin), _pt(ctx.req.destination),
-                                             connector_m=od + dd)], lam))
+                                             connector_m=od + dd)], l_val))
     return out
 
 
@@ -862,6 +933,10 @@ def plan_full(state, req: PlanRequest, cache: OpenCache,
     havens = safe_havens_near(state, cache, departure, *ctx.oxy, 400, limit=3)
     if rec and rec["eta"]["worst"] and datetime.fromisoformat(rec["eta"]["worst"]) + timedelta(minutes=10) < now:
         phase = "arrived"
+    t_route_0 = time.perf_counter()
+    evaluated_routes, tie_info = evaluate_candidate_routes(ctx, plans, ctx.routing_cfg)
+    t_route_ms = (time.perf_counter() - t_route_0) * 1000.0
+
     ps = {
         "phase": phase,
         "computed_at": now.isoformat(timespec="seconds"), "departure": departure.isoformat(timespec="seconds"),
@@ -877,6 +952,10 @@ def plan_full(state, req: PlanRequest, cache: OpenCache,
                       "lon": c["lon"], "status": c["status"]} for c in ctx.er("walk", departure).closures],
         "havens_near_origin": havens,
         "timeline": timeline(ctx),
+        "routes": evaluated_routes,
+        "route_tie": tie_info.get("tie", False),
+        "route_tie_note": tie_info.get("note"),
+        "routing_time_ms": round(t_route_ms, 2),
     }
     for p in plans:
         p.setdefault("explanation", explain(ctx, p, None))
