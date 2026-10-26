@@ -49,6 +49,7 @@ export function BleSection() {
               ["Location switched on", diag.locationOn, "Android only returns Bluetooth scan results with Location on"],
               ...Object.entries(diag.permissions).map(([k, v]) => [`Permission: ${k === "ble" ? "Nearby devices" : k}`, v === "granted", `is "${v}": Settings → Apps → NightWay → Permissions`] as [string, boolean, string]),
               ["Relay running", diag.running, "switch it ON above"],
+              ["Foreground service (keeps relaying with the screen off)", !!diag.serviceRunning, "switch the relay ON; allow notifications"],
             ] as [string, boolean, string][]).map(([label, ok, fix]) => (
               <li key={label} className={ok ? "text-good" : "text-bad"}>{ok ? "✓" : "✗"} {label}{!ok && fix ? ` (${fix})` : ""}</li>
             ))}

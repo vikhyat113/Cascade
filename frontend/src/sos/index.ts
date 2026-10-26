@@ -15,7 +15,10 @@ Preferences.get({ key: "nw.dispatchUrl" }).then(({ value }) => { if (value) url 
 export const dispatch = httpDispatch(() => url);
 export const mesh = new SimulatedMeshTransport(dispatch);
 export const ble = new BleMeshTransport(dispatch);
-export const demoFlags = { forceMesh: false };           // Demo: pretend the phone has no signal for help
+export const demoFlags = {
+  forceMesh: false,                                      // Demo: pretend the phone has no signal for help
+  shortSteps: import.meta.env.VITE_SHOW_DEMO === "true", // Demo: 8 s per help step instead of 20 s
+};
 
 // ---- MESH_REAL: real Bluetooth when it is on and running, else the simulated mesh -----------------
 export const meshMode = { real: CONFIG.mesh.realDefault };
@@ -59,7 +62,8 @@ const set = (s: HelpState | null) => { current = s; subs.forEach((f) => f(s)); }
 
 export function askForHelp(type: SosType, at: { lat: number; lon: number }): void {
   stopCurrent?.();
-  const run = runLadder({ dispatch, mesh: meshTransport, forceMesh: () => demoFlags.forceMesh }, type, at, set);
+  const run = runLadder({ dispatch, mesh: meshTransport, forceMesh: () => demoFlags.forceMesh,
+    stepS: () => (demoFlags.shortSteps ? CONFIG.dispatch.demoAckTimeoutS : CONFIG.dispatch.ackTimeoutS) }, type, at, set);
   stopCurrent = run.stop;
 }
 

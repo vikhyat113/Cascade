@@ -4,7 +4,7 @@ import { PLACE_ICON } from "../components/icons";
 import { BigButton, QuietButton } from "../components/ui";
 import { call } from "../lib/engine";
 import { askForHelp, mapLink, smsHref, useHelp } from "../sos";
-import type { HelpStatus } from "../sos/ladder";
+import type { HelpStatus, HelpTarget } from "../sos/ladder";
 import type { SosType } from "../sos/types";
 import type { Place, PlaceOnWay } from "../types";
 
@@ -54,14 +54,17 @@ export function HelpSheet({ at, fresh, onClose, onGo }: { at: Place | null; fres
   const help = useHelp();
   const [again, setAgain] = useState(false);          // a new request after the last one finished
   const choosing = !help || again;
-  const [near, setNear] = useState<{ hospital: PlaceOnWay | null; police: PlaceOnWay | null } | null>(null);
+  type Near = Record<HelpTarget, PlaceOnWay | null>;
+  const none: Near = { police: null, hospital: null, fire: null, place: null };
+  const [near, setNear] = useState<Near | null>(null);
   useEffect(() => {
-    if (!at) { setNear({ hospital: null, police: null }); return; }
-    call("help", at.lat, at.lon).then(setNear).catch(() => setNear({ hospital: null, police: null }));
+    if (!at) { setNear(none); return; }
+    call("help", at.lat, at.lon).then(setNear).catch(() => setNear(none));
   }, [at?.lat, at?.lon, lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const st = help ? STATUS[help.status] : null;
-  const target = help && help.target !== "contact" ? near?.[help.target] ?? null : null;
+  const target = help ? near?.[help.target] ?? null : null;
+  const WHO: Record<HelpTarget, CopyKey> = { police: "label.police", hospital: "label.hospital", fire: "label.fireStation", place: "label.peopleNearby" };
   return (
     <Overlay onClose={onClose} label={t("label.help")}>
       <h2 className="text-[1.4rem] font-bold">🆘 {t("label.help")}</h2>
@@ -77,10 +80,13 @@ export function HelpSheet({ at, fresh, onClose, onGo }: { at: Place | null; fres
       {!choosing && help && st && (
         <div className="rounded-2xl bg-raised p-4" aria-live="polite">
           <p className={`text-[1.6rem] font-bold ${st.color}`}><span aria-hidden="true">{st.icon} </span>{t(st.key)}</p>
-          {help.target !== "contact" && help.status !== "aware" && <p className="mt-1 text-[1.1rem]">{t("fmt.asking", { who: t(help.target === "police" ? "label.police" : "label.hospital") })}</p>}
-          {help.escalated && help.status !== "aware" && <p className="mt-1 text-warn">{t("line.noAnswerNext")}</p>}
-          {help.via === "mesh" && <p className="mt-1 text-soft">{t("line.viaPhones")}</p>}
-          {help.status === "not_sure" && <p className="mt-1 font-semibold text-warn">{t("line.call112Now")}</p>}
+          {help.target !== "place" && help.status !== "aware" && <p className="mt-1 text-[1.1rem]">{t("fmt.asking", { who: t(WHO[help.target]) })}</p>}
+          {help.escalated && help.status !== "aware" && help.target !== "place" && <p className="mt-1 text-warn">{t("line.noAnswerNext")}</p>}
+          {help.via === "mesh" && help.status !== "aware" && help.target !== "place" && (
+            <p className="mt-1 text-soft">{help.peers > 0 ? t("fmt.reachedPhones", { n: help.peers }) : t("line.noPhonesYet")}</p>
+          )}
+          {help.target === "place" && help.status !== "aware" && <p className="mt-1 font-semibold text-warn">{t("line.goToPeople")}</p>}
+          {help.status === "not_sure" && help.target !== "place" && <p className="mt-1 font-semibold text-warn">{t("line.call112Now")}</p>}
           {target && (
             <div className="mt-3 flex items-center gap-3">
               <span aria-hidden="true" className="text-[1.5rem]">{PLACE_ICON[target.type]}</span>
@@ -89,7 +95,7 @@ export function HelpSheet({ at, fresh, onClose, onGo }: { at: Place | null; fres
                 <p className="text-soft">{target.distance_text}</p>
               </div>
               {target.phone && <a href={`tel:${target.phone}`} className="flex min-h-12 items-center rounded-xl border border-edge px-4 font-bold">📞 {t("label.call")}</a>}
-              <button onClick={() => onGo(target)} className="min-h-12 rounded-xl bg-accent px-4 font-bold text-accent-ink">{t("label.go")}</button>
+              <button onClick={() => onGo(target)} className="min-h-12 rounded-xl bg-accent px-3 font-bold text-accent-ink">{t("label.takeMeThere")}</button>
             </div>
           )}
         </div>

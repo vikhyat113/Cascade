@@ -92,6 +92,10 @@
 - Fixed while testing: sheet size watcher read a removed sheet (page error); bus ways said "Could make you late" when the truth is unknown hours.
 - Checks: 92 app tests (11 golden); browser: Other ways sheet with 4 ways, pick one, no errors; SOS e2e passes.
 
+### U7: help ladder (done, tag up-7)
+- Police → hospital → fire station → open place with people (Take me there / Call); 20 s per step, 8 s in demo; step log in the Demo drawer; "Reached N phones" over the mesh; fire desk on the dispatch server; Bluetooth checklist shows the foreground service.
+- Checks: 94 app tests (order, demo step time, hospital fallback, no false "aware", Bluetooth codes incl. fire); browser: police silent → hospital acknowledges → "Help is aware" (9 s escalation); nobody answers → police, hospital, fire → "Go where people are" (24 s); no errors.
+
 ## Commands
 - Tests: `cd frontend && npm test` · SOS on every screen: `npm run build && npm run e2e` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 

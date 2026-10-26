@@ -37,3 +37,6 @@ Each request: what it was, which layer it touched, what was done.
 ## 9. UPGRADE U3: other ways (tag up-3)
 - **Layer**: engine (`kshortest.ts`, planner candidates + comparison, cache), simple view (`other_ways`, `close_text`), screens (`OtherWays.tsx`, Result link), map colours, copy (EN + HI), golden generator `tools/golden_routing.py`.
 
+## 10. UPGRADE U7: help ladder (tag up-7)
+- **Layer**: `sos/ladder.ts`, `sos/ble.ts` codes, engine `help()`, Help sheet, dispatch server (fire desk), Kotlin service flag, Demo drawer, copy (EN + HI), config.
+

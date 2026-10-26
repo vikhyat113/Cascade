@@ -17,7 +17,9 @@ function fakeServer(o: { reachable?: boolean; ackDesk?: string | null } = {}) {
   };
   return d;
 }
-const AT = { lat: 28.57, lon: 77.32 };
+const AT = { lat: 21.142, lon: 79.08 };
+/** Status as the user sees it change (log lines re-send the same status). */
+const seq = (states: HelpState[]) => states.map((s) => s.status).filter((x, i, a) => i === 0 || x !== a[i - 1]);
 const noMesh = { broadcast: vi.fn(), onReceive: () => () => {}, status: () => ({ peers: 0, mode: "simulated" as const }) };
 
 beforeEach(() => { vi.useFakeTimers(); });
@@ -30,24 +32,42 @@ describe("help ladder", () => {
     const run = runLadder({ dispatch: srv, mesh: noMesh }, "danger", AT, (s) => states.push(s));
     await vi.advanceTimersByTimeAsync(5000);
     const end = await run.done;
-    expect(states.map((s) => s.status)).toEqual(["sending", "passed_on", "aware"]);
+    expect(seq(states)).toEqual(["sending", "passed_on", "aware"]);
     expect(end).toMatchObject({ target: "police", via: "direct", status: "aware" });
     expect(srv.got).toHaveLength(1);
     expect(srv.got[0]).toMatchObject({ to: "police", type: "danger", via: "direct" });
   });
 
-  it("asks the hospital next when police don't answer, then says Not sure", async () => {
+  it("goes police -> hospital -> fire station -> open place with people, then says Not sure", async () => {
     const srv = fakeServer({ ackDesk: null });
     const states: HelpState[] = [];
     const run = runLadder({ dispatch: srv, mesh: noMesh }, "unsure", AT, (s) => states.push(s));
-    await vi.advanceTimersByTimeAsync(2 * CONFIG.dispatch.ackTimeoutS * 1000 + 10000);
-    expect(srv.got.map((r) => r.to)).toEqual(["police", "hospital"]);
+    await vi.advanceTimersByTimeAsync(3 * CONFIG.dispatch.ackTimeoutS * 1000 + 10000);
+    expect(srv.got.map((r) => r.to)).toEqual(["police", "hospital", "fire"]);
     expect(states.some((s) => s.escalated && s.target === "hospital")).toBe(true);
-    expect(states.at(-1)!.status).toBe("not_sure");
+    expect(states.at(-1)!).toMatchObject({ target: "place", status: "not_sure" });
+    expect(states.some((s) => s.status === "aware")).toBe(false);                    // never claims help without an answer
+    expect(states.at(-1)!.log).toContain("police desk: no answer. Trying hospital desk.");
     srv.ack(String(run.id));                                   // a late answer still counts
     await vi.advanceTimersByTimeAsync(CONFIG.dispatch.pollMs * 2);
     expect(states.at(-1)!.status).toBe("aware");
     run.stop();
+  });
+
+  it("uses the short step time in demo mode (8 s)", async () => {
+    const srv = fakeServer({ ackDesk: null });
+    const run = runLadder({ dispatch: srv, mesh: noMesh, stepS: () => CONFIG.dispatch.demoAckTimeoutS }, "danger", AT, () => {});
+    await vi.advanceTimersByTimeAsync(CONFIG.dispatch.demoAckTimeoutS * 1000 + 3000);
+    expect(srv.got.map((r) => r.to)).toEqual(["police", "hospital"]);
+    run.stop();
+  });
+
+  it("falls back to the hospital when the police do not answer, and stops there when it does", async () => {
+    const srv = fakeServer({ ackDesk: "hospital" });
+    const run = runLadder({ dispatch: srv, mesh: noMesh }, "danger", AT, () => {});
+    await vi.advanceTimersByTimeAsync(CONFIG.dispatch.ackTimeoutS * 1000 + 5000);
+    expect(await run.done).toMatchObject({ target: "hospital", status: "aware" });
+    expect(srv.got.map((r) => r.to)).toEqual(["police", "hospital"]);
   });
 
   it("a doctor request goes to the hospital first", async () => {
@@ -70,7 +90,7 @@ describe("simulated mesh", () => {
     expect(srv.got).toHaveLength(1);
     expect(srv.got[0]).toMatchObject({ via: "mesh", to: "police" });
     expect(srv.got[0].hops).toBe(3);
-    expect(states.map((s) => s.status)).toEqual(["sending", "passed_on", "aware"]);
+    expect(seq(states)).toEqual(["sending", "passed_on", "aware"]);
     expect((await run.done).via).toBe("mesh");
     expect(mesh.events.some((e) => e.kind === "dup")).toBe(true);       // gossip reaches some phones twice: dropped
     mesh.dispose();
@@ -119,7 +139,7 @@ describe("Bluetooth packet codes", () => {
   it("round-trips every type and desk through the plugin's 2-bit codes", async () => {
     const { BleMeshTransport } = await import("../ble");
     for (const type of ["danger", "medical", "unsure", "ack"] as const) {
-      for (const to of ["police", "hospital", "contact"] as const) {
+      for (const to of ["police", "hospital", "contact", ...(type === "ack" ? [] : ["fire"] as const)] as const) {
         const p = { id: 4000000000, type, to, lat: 28.570512, lon: 77.322934, ts: 1792965886, hop: 2, ttl: 5 };
         const w = BleMeshTransport.wire(p);
         expect(w.type).toBeGreaterThanOrEqual(0);
@@ -127,6 +147,7 @@ describe("Bluetooth packet codes", () => {
         expect(BleMeshTransport.unwire(w).packet).toEqual(p);
       }
     }
-    expect(BleMeshTransport.unwire({ id: 1, type: 2, to: 3, ttl: 5, hop: 1, lat: 0, lon: 0, ts: 0 })).toMatchObject({ to: "test", packet: null });
+    expect(BleMeshTransport.unwire({ id: 1, type: 3, to: 3, ttl: 5, hop: 1, lat: 0, lon: 0, ts: 0 })).toMatchObject({ to: "test", packet: null });
+    expect(BleMeshTransport.unwire({ id: 1, type: 2, to: 3, ttl: 5, hop: 1, lat: 0, lon: 0, ts: 0 }).packet).toMatchObject({ to: "fire", type: "unsure" });
   });
 });

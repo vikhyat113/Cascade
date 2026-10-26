@@ -109,12 +109,14 @@ export const CONFIG = {
   dispatch: {
     // the phone reaches the laptop over Wi-Fi: set VITE_DISPATCH_URL at build time or in the Demo drawer
     defaultUrl: import.meta.env.VITE_DISPATCH_URL || "http://localhost:8787",
-    ackTimeoutS: 20,          // demo: short; escalate to the next helper after this
+    ackTimeoutS: 20,          // escalate to the next helper after this (UPGRADE §8)
+    demoAckTimeoutS: 8,       // ... with the Demo "Short help steps" switch
     reachTimeoutMs: 2500,     // "can the phone reach the server?" check
     sendTimeoutMs: 5000,
     pollMs: 2000,             // ask the server for an acknowledgement this often
     // who is asked first, then next, when nobody acknowledges
-    ladder: { danger: ["police", "hospital"], medical: ["hospital", "police"], unsure: ["police", "hospital"] } as Record<string, ("police" | "hospital")[]>,
+    // then the nearest open place with people (24 h pharmacy, fuel, hotel): see sos/ladder.ts
+    ladder: { danger: ["police", "hospital", "fire"], medical: ["hospital", "police", "fire"], unsure: ["police", "hospital", "fire"] } as Record<string, ("police" | "hospital" | "fire")[]>,
   },
   mesh: {
     nodes: 6,                 // virtual phones in the simulated mesh (node 0 = this phone, last = gateway)

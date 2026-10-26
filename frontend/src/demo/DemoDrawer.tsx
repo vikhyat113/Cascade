@@ -2,7 +2,7 @@ import { CONFIG } from "../config";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { SimpleView } from "../types";
 import { ago, anyLive, demo, OFFICIAL, type LogLine, type SimState, type Source, type Status } from "./demoApi";
-import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl } from "../sos";
+import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl, useHelp } from "../sos";
 import { BleSection } from "./BleSection";
 import { FakeGpsSection } from "./FakeGpsSection";
 import { LocationCheck } from "./LocationCheck";
@@ -20,6 +20,7 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
   const [open, setOpen] = useState<Record<string, boolean>>({ break: true, happen: true, time: true });
   const [log, setLog] = useState<LogLine[]>([]);
   const [url, setUrl] = useState(getDispatchUrl());
+  const helpRun = useHelp();
   const [, bump] = useState(0);
   const flip = (f: () => void) => { f(); bump((n) => n + 1); };
 
@@ -188,6 +189,17 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
               if (!(await dispatch.reachable())) throw new Error(`can't reach ${getDispatchUrl()}`);
             }, `Dispatch server reachable at ${url}`)} />
           </div>
+          <button onClick={() => flip(() => { demoFlags.shortSteps = !demoFlags.shortSteps; })} aria-pressed={demoFlags.shortSteps}
+            className={`mt-2 min-h-12 w-full rounded-2xl border px-3 font-semibold ${demoFlags.shortSteps ? "border-accent bg-accent/15" : "border-edge bg-raised"}`}>
+            Short help steps: {demoFlags.shortSteps ? `ON (${CONFIG.dispatch.demoAckTimeoutS} s per desk)` : `off (${CONFIG.dispatch.ackTimeoutS} s per desk)`}
+          </button>
+          <p className="mt-1 text-[0.85rem] text-soft">Ladder: police, hospital, fire station (a doctor request asks the hospital first), then the nearest open place with people (no alert possible there).</p>
+          {helpRun && (
+            <ol className="mt-2 max-h-40 space-y-0.5 overflow-y-auto rounded-xl bg-raised p-2 font-mono text-[0.8rem]">
+              <li className="text-soft">help #{helpRun.id}: {helpRun.type}, step {helpRun.step + 1}/{helpRun.steps} ({helpRun.target}), status {helpRun.status}, via {helpRun.via ?? "-"}</li>
+              {helpRun.log.map((l, i) => <li key={i}>{l}</li>)}
+            </ol>
+          )}
           <div className="mt-2">
             <Act label="Safety timer: ask now" onClick={() => act(async () => {
               if (!(await fireTimerSoon())) throw new Error("no timer: switch on “Tell my contact if I’m late”, then Start");

@@ -104,7 +104,8 @@ export class Engine {
 
   /** Nearest help: police and hospital / clinic (with ways there). */
   help(lat: number, lon: number, lang: Lang) {
-    return { police: this.needNow("police", lat, lon, lang)[0] ?? null, hospital: this.needNow("doctor", lat, lon, lang)[0] ?? null };
+    const first = (kind: string, openOnly = false) => this.needNow(kind, lat, lon, lang).find((p) => !openOnly || p.state === "open" || p.state === "maybe_open") ?? null;
+    return { police: first("police"), hospital: first("doctor"), fire: first("fire"), place: first("people", true) };
   }
 
   // ---- demo controls --------------------------------------------------------------------------------

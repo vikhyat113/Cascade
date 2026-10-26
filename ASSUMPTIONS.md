@@ -120,3 +120,11 @@ Decisions made without asking (per the working rules), with the reason for each.
 * **Caching**: walking candidates are reused per start, end, 15-min risk slice and blocked streets (the re-planner runs every tick).
 * **Screens**: the Result screen keeps its tabs; a small "Other ways" link opens up to 4 ways (arrive time, Safe/OK/Be careful, minutes outside, one-line why) and draws them in different colours; "Close choice. Safest picked." on a tie. The Python's technical texts (scores, "probable data") stay in the plan details for the Demo drawer; the screens use plain reason lines.
 
+## UPGRADE U7: help ladder "reach whatever you can"
+
+* **Order**: danger and not sure: police → hospital → fire station; doctor: hospital → police → fire station; then the **nearest open place with people** (24 h pharmacy, fuel, hotel; open or maybe open now). That last step cannot receive an alert, so the app says "Not sure" and "Go where people are, or call 112." with **Take me there** and **Call** (when OSM has a phone number).
+* **Step time** 20 s, **8 s** with the Demo switch "Short help steps" (on by default in demo builds).
+* **Statuses** stay plain; "Help is aware" only after an acknowledgement; every step is logged for the Demo drawer ("police desk: no answer. Trying hospital desk."). Over the mesh the sheet says what was reached ("Reached 2 phones. No police link yet.").
+* **Fire desk**: added to the dispatch server (`to: fire`, Fire tab). Over Bluetooth the 2-bit desk code 3 now means fire; a test packet is an `ack` to code 3 (never a real acknowledgement, never posted).
+* **Bluetooth pre-flight**: the Demo checklist also shows whether the foreground service runs (MeshService flag). Help uses real Bluetooth only when it is on and running; otherwise the simulated mesh.
+

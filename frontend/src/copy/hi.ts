@@ -209,6 +209,13 @@ export const hi: Record<CopyKey, string> = {
   "line.whyUnlit": "ज़्यादा अंधेरी या बिना निशान की सड़कें।",
   "line.whyBalance": "कम फ़ायदे के लिए ज़्यादा समय बाहर।",
 
+  "label.takeMeThere": "मुझे वहाँ ले चलें",
+  "label.fireStation": "अग्निशमन केंद्र",
+  "label.peopleNearby": "पास में लोग",
+  "line.goToPeople": "जहाँ लोग हों वहाँ जाएँ, या 112 पर कॉल करें।",
+  "fmt.reachedPhones": "{n} फ़ोन तक पहुँचा। पुलिस से अभी जुड़ा नहीं।",
+  "line.noPhonesYet": "पास में अभी कोई फ़ोन नहीं।",
+
   "reason.lit": "रोशनी वाली सड़कें",
   "reason.mainRoads": "मुख्य सड़कें",
   "reason.shopsOpen": "रास्ते में दुकानें खुली",

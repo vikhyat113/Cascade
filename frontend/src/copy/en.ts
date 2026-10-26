@@ -209,6 +209,13 @@ export const en = {
   "line.whyUnlit": "More dark or unmarked streets.",
   "line.whyBalance": "More time outside for little gain.",
 
+  "label.takeMeThere": "Take me there",
+  "label.fireStation": "Fire station",
+  "label.peopleNearby": "People nearby",
+  "line.goToPeople": "Go where people are, or call 112.",
+  "fmt.reachedPhones": "Reached {n} phones. No police link yet.",
+  "line.noPhonesYet": "No phones nearby yet.",
+
   "reason.lit": "lit roads",
   "reason.mainRoads": "main roads",
   "reason.shopsOpen": "shops open on the way",
