@@ -31,3 +31,6 @@ Each request: what it was, which layer it touched, what was done.
 ## 7. UPGRADE U6: deviation warning (tag up-6)
 - **Layer**: engine (`deviation.ts`), position source (`lib/position.ts`, real or Demo fake GPS), App banners and re-plan, copy (EN + HI), config `deviation`, Demo drawer 10.
 
+## 8. UPGRADE U2: map layers (tag up-2)
+- **Layer**: data scripts (`fetch_viirs.py`, `fetch_weather_grid.py`), engine (`world.ts` satellite prior, `heatmap.ts`, `astronomy.ts`), worker layer data, `lib/layers.ts`, `screens/Layers.tsx`, map drawing, copy (EN + HI), config.
+

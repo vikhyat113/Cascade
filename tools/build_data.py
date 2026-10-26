@@ -82,6 +82,36 @@ def seg_dist(px, py, ax, ay, bx, by) -> float:
     return math.hypot(px - ax - k * dx, py - ay - k * dy)
 
 
+def viirs_sampler():
+    """Night-light brightness (0-255, -1 = none) at a point, from data/viirs_ntl.json (scripts/fetch_viirs.py)."""
+    p = ROOT / "data" / "viirs_ntl.json"
+    if not p.exists():
+        return None, None
+    v = json.loads(p.read_text(encoding="utf-8"))
+    b, c, nx, ny, vals = v["bbox"], v["cell_deg"], v["nx"], v["ny"], v["values"]
+    def at(lat, lon):
+        r, k = int((b["north"] - lat) / c), int((lon - b["west"]) / c)
+        return vals[r * nx + k] if 0 <= r < ny and 0 <= k < nx else -1
+    return at, v
+
+
+def write_layers():
+    """Map-layer files, fetched by the app only when a layer is switched on (UPGRADE §3: lazy)."""
+    out = OUT / "layers"
+    out.mkdir(parents=True, exist_ok=True)
+    sizes = {}
+    _, v = viirs_sampler()
+    if v:
+        (out / "viirs.json").write_text(json.dumps({k: v[k] for k in ("source", "licence", "note", "nights", "bbox", "cell_deg", "nx", "ny", "values")},
+                                                   separators=(",", ":")), encoding="utf-8")
+        sizes["layers/viirs.json"] = (out / "viirs.json").stat().st_size
+    wg = ROOT / "data" / "weather_grid.json"
+    if wg.exists():
+        (out / "weather.json").write_text(wg.read_text(encoding="utf-8"), encoding="utf-8")
+        sizes["layers/weather.json"] = (out / "weather.json").stat().st_size
+    return sizes
+
+
 def build_real():
     from app.config import data_dir, get_config
     from app.core.world import StaticWorld
@@ -98,7 +128,8 @@ def build_real():
     lamp_tree = cKDTree([[p.x, p.y] for p in lamps]) if lamps else None
     hw_codes, names = [], []
     hw_idx, name_idx = {}, {}
-    E = {k: [] for k in ("u", "v", "len", "hw", "lit", "lamps", "name", "geom")}
+    E = {k: [] for k in ("u", "v", "len", "hw", "lit", "lamps", "name", "geom", "ntl")}
+    ntl_at, _ = viirs_sampler()
     for e in range(G.m):
         hw = G.ehw[e]
         if hw not in hw_idx:
@@ -127,6 +158,7 @@ def build_real():
         E["lamps"].append(n_lamps)
         E["name"].append(name_idx[nm] if nm else -1)
         E["geom"].append([round(v, 6) for k in kept for v in (geom[k][1], geom[k][0])])  # flat lat,lon
+        E["ntl"].append(ntl_at(float(G.emlat[e]), float(G.emlon[e])) if ntl_at else -1)    # night lights from satellite
     graph = {"source": "OpenStreetMap contributors via OSMnx (real)", "generated_at": G.generated_at,
              "nodes": [[round(float(a), 6), round(float(b), 6)] for a, b in zip(G.lat, G.lon)],
              "edges": E, "hw_codes": hw_codes, "names": names, "grid_m": 250}
@@ -183,7 +215,8 @@ def build_real():
         "generated_at": now, "sample": False,
         "real": ["street graph (OSM)", "places + opening hours (OSM)", "lit tags (OSM)",
                  "weather snapshot (Open-Meteo)", "bus-stop and metro-station locations (OSM)", "area zones (OSM main road)",
-                 "Nagpur Metro lines, stops and hours (OSM relations)"],
+                 "Nagpur Metro lines, stops and hours (OSM relations)", "night lights from satellite (NASA VIIRS Black Marble)",
+                 "weather grid (Open-Meteo)"],
         "synthetic": ["incident history", "bus routes E1-E4 (estimated: no open bus data for Nagpur; hours unknown)",
                       "traffic", "live bus / metro status", "road closures"],
     }
@@ -251,6 +284,8 @@ def main():
         print(f"  {name:<15} {size / 1024:8.0f} KB")
     meta = bundle[-1]
     print(f"  total           {total / 1024:8.0f} KB  (limit for graph.json: 8 MB)")
+    for name, size in write_layers().items():
+        print(f"  {name:<15} {size / 1024:8.0f} KB  (lazy: loaded when the layer is switched on)")
     print("Real:      " + (", ".join(meta["real"]) or "nothing"))
     print("Synthetic: " + ", ".join(meta["synthetic"]))
 

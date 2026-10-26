@@ -47,6 +47,12 @@ export const CONFIG = {
     transitRideFactor: 0.3,
     safeHavenWaitRisk: 0.08,
     nightHours: [19, 6] as [number, number],
+    // Lighting prior from satellite night lights (VIIRS) for streets with no lit tag and no lamps:
+    // PROBABLE (never KNOWN), only when the area is bright / dark enough to say something.
+    viirsPrior: true,
+    viirsBright: 220,           // relative brightness 0-255 (see scripts/fetch_viirs.py)
+    viirsDark: 140,
+    viirsRisk: { bright: [0.15, 0.55], mid: [0.3, 0.75], dark: [0.5, 0.95] } as Record<string, [number, number]>,
   },
   planner: {
     lambdas: [0, 0.5, 1, 2, 4],

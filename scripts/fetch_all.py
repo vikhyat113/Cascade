@@ -2,8 +2,8 @@
 
     backend/.venv/Scripts/python scripts/fetch_all.py [--force]
 
-Order: weather (Open-Meteo) -> POIs (Overpass) -> street graphs (OSMnx) ->
-transit timetable (built on real stop locations) -> synthetic incident history.
+Order: places (Nominatim) -> zones -> weather + weather grid (Open-Meteo) -> POIs (Overpass) ->
+street graphs (OSMnx) -> night lights (NASA GIBS) -> transit (OSM relations / estimated) -> synthetic incidents.
 Run it once before the event (needs internet); the demo itself is fully offline.
 """
 from __future__ import annotations
@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-STEPS = ["fetch_weather.py", "fetch_pois.py", "fetch_graph.py", "build_transit.py", "gen_incidents.py"]
+STEPS = ["geocode_places.py", "area.py", "fetch_weather.py", "fetch_weather_grid.py", "fetch_pois.py", "fetch_graph.py",
+         "fetch_viirs.py", "build_transit.py", "gen_incidents.py"]
 
 
 def main():

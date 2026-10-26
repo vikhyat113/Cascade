@@ -7,7 +7,7 @@ import { Proj, Rng } from "./util";
 // ---- bundle shapes (written by tools/build_data.py) ----------------------------------------------
 export interface GraphJson {
   generated_at: string | null; nodes: [number, number][]; hw_codes: string[]; names: string[];
-  edges: { u: number[]; v: number[]; len: number[]; hw: number[]; lit: number[]; lamps: number[]; name: number[]; geom: number[][] };
+  edges: { u: number[]; v: number[]; len: number[]; hw: number[]; lit: number[]; lamps: number[]; name: number[]; geom: number[][]; ntl?: number[] };
 }
 export interface PoiJson { id: string; type: string; name: string | null; lat: number; lon: number; opening_hours: string | null; phone: string | null; emergency?: string | null; edited_at: string | null }
 export interface PlaceJson { name: string; lat: number; lon: number; kind: string }
@@ -30,6 +30,7 @@ export interface AreaHit { inside: boolean; distM: number; zone: string | null }
 
 export interface Bundle { graph: GraphJson; pois: PoiJson[]; places: PlaceJson[]; weather: WeatherJson; incidents: IncidentsJson; schedule: ScheduleJson; meta: MetaJson }
 
+export const LIGHT_SRC = { mapped: 0, mainRoad: 1, satellite: 2, none: 3 } as const;
 export const MAIN = new Set(["motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link"]);
 const MINOR = new Set(["residential", "unclassified", "living_street", "service", "road"]);
 const NO_CARS = new Set(["footway", "path", "pedestrian", "steps", "track", "cycleway", "bridleway", "corridor"]);
@@ -71,6 +72,8 @@ export class World {
   m: number; eu: Int32Array; ev: Int32Array; elen: Float64Array; ehw: string[]; ename: (string | null)[]; egeom: number[][];
   emx: Float64Array; emy: Float64Array; isMain: Uint8Array; carOk: Uint8Array; ttFree: Float64Array;
   lightLo: Float32Array; lightHi: Float32Array; lightCode: Uint8Array; lightConf: Float32Array;
+  lightSrc: Uint8Array;              // where the lighting estimate comes from: LIGHT_SRC
+  ntl: Int16Array;                   // night lights from satellite, 0-255 (-1 = none)
   // places
   pois: Poi[]; facilities: Poi[]; places: { name: string; norm: string; lat: number; lon: number; kind: string }[];
   // models
@@ -123,13 +126,18 @@ export class World {
     this.emx = new Float64Array(m); this.emy = new Float64Array(m);
     this.isMain = new Uint8Array(m); this.carOk = new Uint8Array(m); this.ttFree = new Float64Array(m);
     this.lightLo = new Float32Array(m); this.lightHi = new Float32Array(m); this.lightCode = new Uint8Array(m); this.lightConf = new Float32Array(m);
+    this.lightSrc = new Uint8Array(m);
+    this.ntl = Int16Array.from(E.ntl ?? new Array(m).fill(-1));
+    const R = CONFIG.risk;
     this.isoBase = new Float32Array(m); this.walkTraffic = new Float32Array(m);
     const osm = SOURCES.osm_map;
     const osmFact: Fact = { key: "osm_map", value: "ok", source: "osm_map", synthetic: false, observedAt: this.mapAt, ttlS: osm.ttlS, reliability: osm.reliability, kind: "observed" };
     const priorFact: Fact = { key: "prior:lighting", value: "main roads usually lit", source: "prior", synthetic: false, observedAt: this.mapAt, ttlS: osm.ttlS, reliability: 0.5, kind: "prior" };
     const at = Date.now();
     const osmSt = status(osmFact, at), osmC = confidence(osmFact, at), prSt = status(priorFact, at), prC = confidence(priorFact, at);
-    const set = (e: number, lo: number, hi: number, st: Status, c: number) => { this.lightLo[e] = lo; this.lightHi[e] = hi; this.lightCode[e] = CODE[st]; this.lightConf[e] = c; };
+    const satFact: Fact = { key: "prior:viirs", value: "night lights from satellite", source: "prior", synthetic: false, observedAt: this.mapAt, ttlS: osm.ttlS, reliability: 0.45, kind: "prior" };
+    const satSt = status(satFact, at), satC = confidence(satFact, at);
+    const set = (e: number, lo: number, hi: number, st: Status, c: number, src: number = LIGHT_SRC.none) => { this.lightLo[e] = lo; this.lightHi[e] = hi; this.lightCode[e] = CODE[st]; this.lightConf[e] = c; this.lightSrc[e] = src; };
     for (let e = 0; e < m; e++) {
       const g = this.egeom[e];
       const k = Math.floor(g.length / 4) * 2;           // middle vertex (flat lat,lon list)
@@ -141,9 +149,14 @@ export class World {
       this.carOk[e] = NO_CARS.has(hw) ? 0 : 1;
       this.ttFree[e] = this.elen[e] / ((KPH[hw.replace("_link", "")] ?? 25) / 3.6);
       const lit = E.lit[e];
-      if (lit === 1 || E.lamps[e] >= 1) set(e, 0.05, 0.2, osmSt, osmC);         // mapped lit / lamps nearby
-      else if (lit === 0) set(e, 0.8, 1.0, osmSt, osmC);                         // mapped unlit
-      else if (MAIN.has(hw)) set(e, 0.15, 0.6, prSt, prC);                       // prior: main roads usually lit
+      const sat = this.ntl[e];
+      if (lit === 1 || E.lamps[e] >= 1) set(e, 0.05, 0.2, osmSt, osmC, LIGHT_SRC.mapped);         // mapped lit / lamps nearby
+      else if (lit === 0) set(e, 0.8, 1.0, osmSt, osmC, LIGHT_SRC.mapped);                         // mapped unlit
+      else if (MAIN.has(hw)) set(e, 0.15, 0.6, prSt, prC, LIGHT_SRC.mainRoad);                     // prior: main roads usually lit
+      else if (R.viirsPrior && sat >= 0) {                                                         // prior: satellite (never KNOWN)
+        const [lo, hi] = R.viirsRisk[sat >= R.viirsBright ? "bright" : sat >= R.viirsDark ? "mid" : "dark"];
+        set(e, lo, hi, satSt, satC, LIGHT_SRC.satellite);
+      }
       else if (MINOR.has(hw)) set(e, 0.25, 0.9, "UNKNOWN", 0);                   // no data: wide interval, no value
       else set(e, 0.35, 1.0, "UNKNOWN", 0);
       this.isoBase[e] = CLASS_ISO[hw] ?? 0.45;

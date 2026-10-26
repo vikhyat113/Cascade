@@ -81,6 +81,11 @@
 - Checks: 9 deviation tests (maths, jitter quiet, hysteresis, accuracy, far by distance / time, vehicle line, snooze, far during snooze, still) + re-plan from an off point; browser run: off after 24 s, I'm fine, far, New way; SOS e2e still passes.
 - Unverified on the phone: real GPS watch accuracy and battery during a trip.
 
+### U2: map layers (done, tag up-2)
+- Layers button + sheet: Streets lit, Safety heat (hour slider), Help places (open now / include not sure), Weather, Night lights; More: strength, moon light (computed), details in plain words. Lazy layer files.
+- Night lights from NASA satellite (public GIBS, median of 8 nights) + lighting prior for unmarked streets (PROBABLE only; lowers UNKNOWN share). Weather grid (Open-Meteo, 13 points). Thermal cut (documented).
+- Checks: 79 app tests (satellite prior: lowers UNKNOWN, never KNOWN, never overrides tags; moon new/full and up/down; heat cells and hours); browser run: all five layers on, lazy files fetched only on switch-on, no errors; SOS e2e passes.
+
 ## Commands
 - Tests: `cd frontend && npm test` · SOS on every screen: `npm run build && npm run e2e` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 

@@ -177,7 +177,12 @@ export class SimpleViewBuilder {
     const light = cats.get("lighting");
     if (light && p.walkM >= 150) {
       if (light.status === "KNOWN" && r.lighting <= 0.35) pos.push(["reason.lit", 0.9 - r.lighting]);
-      else if (light.status === "PROBABLE") pos.push(["reason.mainRoads", 0.55]);
+      else if (light.status === "PROBABLE") {
+        const m = /(\d+)% main roads, (\d+)% satellite/.exec(light.detail);
+        const main = m ? Number(m[1]) : 100, sat = m ? Number(m[2]) : 0;
+        if (main >= sat) pos.push(["reason.mainRoads", 0.55]);
+        else if (r.lighting <= 0.45) pos.push(["reason.brightArea", 0.5]);      // bright from satellite: never "lit roads"
+      }
       if (r.lighting >= 0.45 && (light.status === "UNKNOWN" || light.status === "KNOWN")) neg.push(["reason.dark", r.lighting]);
     }
     const open = new Set(p.openAlong.map((o) => o.type));

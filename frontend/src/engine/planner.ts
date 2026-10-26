@@ -219,9 +219,13 @@ class Eval {
       const lw = comps.lighting.w;
       const sh = shares(lw);
       const conf = idx.reduce((a, e, i) => a + w.lightConf[e] * L[i], 0) / tot;
-      facts.push(mkView("lighting:segment", `${Math.round(sh.KNOWN * 100)}% mapped, ${Math.round(sh.PROBABLE * 100)}% main-road prior`, coverageStatus(lw), conf, "osm_map", false,
+      const bySrc = [0, 0, 0, 0];
+      idx.forEach((e, i) => { bySrc[w.lightSrc[e]] += L[i]; });
+      const pc = (k: number) => Math.round((bySrc[k] / tot) * 100);
+      const src = `${pc(0)}% mapped, ${pc(1)}% main roads, ${pc(2)}% satellite`;
+      facts.push(mkView("lighting:segment", src, coverageStatus(lw), conf, "osm_map", false,
         `${Math.round(sh.UNKNOWN * 100)}% of this stretch has no lighting data`, [Math.round(comps.lighting.lo * 100) / 100, Math.round(comps.lighting.hi * 100) / 100]));
-      this.coverage("lighting", { ...lw }, conf, `${Math.round(sh.KNOWN * 100)}% mapped, ${Math.round(sh.PROBABLE * 100)}% main-road prior, ${Math.round(sh.UNKNOWN * 100)}% no data`);
+      this.coverage("lighting", { ...lw }, conf, `${src}, ${Math.round(sh.UNKNOWN * 100)}% no data`);
       const iconf = (Object.entries(comps.isolation.w) as [Status, number][]).reduce((a, [k, v]) => a + STATUS_CONF[RANK[k]] * v, 0) / tot;
       this.coverage("isolation", { ...comps.isolation.w }, iconf, "open-state of places along the way");
       const hs = c.s.sourceView("incident_history");

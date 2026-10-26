@@ -2,7 +2,10 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { CONFIG } from "./config";
 import { useT, type CopyKey } from "./copy";
 import type { TripAsk } from "./engine/worker";
-import { MapCanvas } from "./components/MapCanvas";
+import { MapCanvas, type MapLayers } from "./components/MapCanvas";
+import { LAYER_DEFAULT, loadLayerState, loadViirs, loadWeatherGrid, saveLayerState, viirsImage, type LayerId, type LayerState } from "./lib/layers";
+import { LayersButton, LayersSheet } from "./screens/Layers";
+import { THEME } from "./theme";
 import { SosButton } from "./components/SosButton";
 import { BackButton, Banner, DeviationBanner, Pill } from "./components/ui";
 import { setDemoActive } from "./lib/demoFlag";
@@ -70,6 +73,14 @@ function Main() {
   const devMon = useRef(new DeviationMonitor());
   const fixRef = useRef<{ lat: number; lon: number } | null>(null);
   const fakeOn = useFakeGps();
+  // ---- map layers (UPGRADE §3) ----
+  const [layerState, setLayerState] = useState<LayerState>(LAYER_DEFAULT);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [layerData, setLayerData] = useState<MapLayers>({});
+  const [layerMissing, setLayerMissing] = useState<Partial<Record<LayerId, boolean>>>({});
+  const [layerMeta, setLayerMeta] = useState<{ night: string | null; weather: string | null }>({ night: null, weather: null });
+  useEffect(() => { loadLayerState().then(setLayerState); }, []);
+  const setLayers = (s: LayerState) => { setLayerState(s); saveLayerState(s); };
   useEffect(() => { setDemoActive(fakeOn || Math.abs(appNow - Date.now()) > 120000); }, [fakeOn, appNow]);
   const seen = useRef(new Set<string>());
   const ask = useRef<TripAsk | null>(null);
@@ -160,6 +171,43 @@ function Main() {
       if (inside || !here()) setHelp((h) => (h ? { at: { ...p, name: "" }, fresh: true } : h));
     });
   };
+
+  // ---- map layers: each loads when switched on; heat and help places follow the app clock ----
+  const appHour = cfg ? new Date(appNow + (cfg.tz_offset_min ?? 330) * 60000).getUTCHours() : 0;
+  const appQuarter = Math.floor(appNow / 900000);
+  const on = layerState.on;
+  useEffect(() => {
+    if (!on.lit) { setLayerData((d) => ({ ...d, lit: null })); return; }
+    call("litStreets").then((r) => setLayerData((d) => ({ ...d, lit: { lit: r.lit, dark: r.dark } }))).catch(() => setLayerMissing((m) => ({ ...m, lit: true })));
+  }, [on.lit]);
+  useEffect(() => {
+    if (!on.heat) { setLayerData((d) => ({ ...d, heat: null })); return; }
+    call("heat", layerState.heatHour ?? appHour).then((r) => setLayerData((d) => ({ ...d, heat: { cells: r.cells, strength: layerState.strength.heat } }))).catch(() => {});
+  }, [on.heat, layerState.heatHour, layerState.strength.heat, layerState.heatHour === null ? appHour : 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!on.help) { setLayerData((d) => ({ ...d, help: null })); return; }
+    call("helpPlaces", layerState.helpNotSure, layerState.helpOpenOnly).then((r) => setLayerData((d) => ({ ...d, help: r }))).catch(() => {});
+  }, [on.help, layerState.helpNotSure, layerState.helpOpenOnly, appQuarter]);
+  useEffect(() => {
+    if (!on.weather || !cfg) { setLayerData((d) => ({ ...d, weather: null })); return; }
+    loadWeatherGrid().then((g) => {
+      const key = new Date(appNow + (cfg.tz_offset_min ?? 330) * 60000).toISOString().slice(0, 13) + ":00";
+      const k = g ? g.time.indexOf(key) : -1;
+      if (!g || k < 0) { setLayerMissing((m) => ({ ...m, weather: true })); setLayerData((d) => ({ ...d, weather: null })); return; }
+      setLayerMissing((m) => ({ ...m, weather: false }));
+      setLayerMeta((x) => ({ ...x, weather: g.fetched_at.slice(0, 10) }));
+      setLayerData((d) => ({ ...d, weather: g.points.map((p) => ({ lat: p.lat, lon: p.lon, temp: p.temp[k], rain: p.rain_prob[k] })) }));
+    });
+  }, [on.weather, appHour, cfg]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!on.night || !cfg) { setLayerData((d) => ({ ...d, night: null })); return; }
+    loadViirs(cfg.bbox).then((v) => {
+      if (!v) { setLayerMissing((m) => ({ ...m, night: true })); return; }
+      const hex = THEME.color.warn, rgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+      setLayerMeta((x) => ({ ...x, night: `${v.nights[v.nights.length - 1]} … ${v.nights[0]}` }));
+      setLayerData((d) => ({ ...d, night: { url: viirsImage(v, rgb), bounds: [[v.bbox.south, v.bbox.west], [v.bbox.north, v.bbox.east]], strength: layerState.strength.night } }));
+    });
+  }, [on.night, layerState.strength.night, cfg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- one banner at a time, each shown once ---------------------------------------------------
   useEffect(() => {
@@ -337,7 +385,7 @@ function Main() {
   const demo = { showDemo: SHOW_DEMO, onDemo: () => setDemoOpen(true) };
   return (
     <div className="relative h-full overflow-hidden">
-      <MapCanvas center={cfg.center} bbox={cfg.bbox} bottomPad={sheetH} topPad={screen === "trip" ? 150 : 80} {...mapView}
+      <MapCanvas center={cfg.center} bbox={cfg.bbox} layers={layerData} bottomPad={sheetH} topPad={screen === "trip" ? 150 : 80} {...mapView}
         onPick={screen === "pick" ? async (lat, lon) => {
           const name = (await call("where", lat, lon).catch(() => null)) || t("label.pickedPoint");
           choosePlace({ lat, lon, name }, field === "to" ? pickSave : null);
@@ -385,6 +433,11 @@ function Main() {
       {safety && !help && from && <SafetySheet at={here() ?? from} late={safety === "late"} onHome={imHome} onHelp={safetyHelp} />}
       {askOk && !safety && !help && from && <SafetySheet ok at={here() ?? from} late={false}
         onHome={() => { devMon.current.okStill(Date.now()); setAskOk(false); }} onHelp={() => { setAskOk(false); openHelp(); }} />}
+      {screen !== "search" && screen !== "pick" && (
+        <LayersButton bottom={sheetH} onOpen={() => setLayersOpen(true)} active={Object.values(on).some(Boolean)} />
+      )}
+      {layersOpen && <LayersSheet state={layerState} onChange={setLayers} onClose={() => setLayersOpen(false)}
+        missing={layerMissing} nightDate={layerMeta.night} weatherTime={layerMeta.weather} />}
       <SosButton onPress={openHelp} />
 
       <Suspense fallback={null}>

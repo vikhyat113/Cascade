@@ -100,3 +100,15 @@ Decisions made without asking (per the working rules), with the reason for each.
 * **"Are you OK?"** after 5 min without moving 25 m, at night, not on a ride (reuses the safety-timer sheet: I'm fine / I need help).
 * **Demo**: "Walk the way" 1× / 10× moves a fake GPS along the way (1.3 m/s × speed); "Wander off" 80 / 300 m **jumps** to a spot that far off (the side farther from the whole way) and stays there. A "Demo time" chip shows in the sheet footer while time or location is simulated.
 
+## UPGRADE U2: map layers
+
+* **Layers** (round button above the sheet): Streets lit, Safety heat, Help places, Weather, Night lights; "More" holds strength sliders, moon light and plain-words details. Choices are remembered on the phone. Night lights and the weather grid are separate asset files fetched only when switched on (`frontend/src/data/layers/`); missing or not covering the area → "Not available here."
+* **Night lights**: NASA GIBS (public, no login), layer `VIIRS_SNPP_GapFilled_BRDF_Corrected_DayNightBand_Radiance` (Black Marble VNP46A2, ~500 m), **median of 8 nights** (Aug-Oct 2026), stored as **relative** brightness 0-255 (the rendering saturates in the city core; not radiance). The changes branch used an Earthdata token; not needed here.
+* **Lighting prior from satellite** (`risk.viirsPrior`, on): only for streets with no lit tag, no lamp and not a main road; bright (>= 220) / medium / dark (< 140) give PROBABLE intervals [0.15-0.55] / [0.3-0.75] / [0.5-0.95]; **never KNOWN**; mapped tags and the main-road prior win. It lowers the UNKNOWN-lighting share by more than 20 points (test); the user never sees "lit roads" because of it (reason: "bright area at night").
+* **Streets lit** draws only what OSM says (97 streets lit or dark here); the rest is "not sure", said in Details.
+* **Safety heat**: per 250 m cell with streets, 0.45 × incident estimate for the hour (synthetic practice data) + 0.35 × lighting + 0.2 × isolation, coloured relative to the visible cells; hour slider 22:00-06:00 or "Now" (app clock). Labelled a rough guess with practice data.
+* **Help places**: hospitals, clinics, police, pharmacies, fire stations, fuel, hotels with their open state at the app clock (never "open" without known hours); "Open now only" and "Include not sure".
+* **Weather**: Open-Meteo forecast at 13 points 3 km apart over the zones (one request), shown for the app clock's hour.
+* **Moon light**: computed on the phone (SunCalc formulas, BSD-2) as bright / some / none from illumination and altitude; "computed, not measured". The changes branch's fixed 35° altitude fallback was not ported.
+* **Thermal (land surface temperature) was cut** (UPGRADE §11 cut order): it needs MODIS HDF processing via Planetary Computer that could not be done reliably in the time; nothing is shown for it.
+

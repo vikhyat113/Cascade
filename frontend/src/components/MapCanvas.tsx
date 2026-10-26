@@ -8,7 +8,17 @@ import { THEME } from "../theme";
 import type { LatLon, PlaceOnWay } from "../types";
 import { PLACE_ICON } from "./icons";
 
+/** What the map layers draw (UPGRADE §3). Each is null while off. */
+export interface MapLayers {
+  lit?: { lit: { pts: Float32Array; off: Uint32Array }; dark: { pts: Float32Array; off: Uint32Array } } | null;
+  heat?: { cells: number[][]; strength: number } | null;
+  help?: { lat: number; lon: number; type: string; name: string; state: "open" | "maybe_open" | "not_sure" | "closed" }[] | null;
+  weather?: { lat: number; lon: number; temp: number | null; rain: number | null }[] | null;
+  night?: { url: string; bounds: [[number, number], [number, number]]; strength: number } | null;
+}
+
 type Props = {
+  layers?: MapLayers;
   center: { lat: number; lon: number };
   bbox: [number, number, number, number];   // [south, west, north, east] of the zones the app has data for
   path?: LatLon[] | null;
@@ -41,6 +51,13 @@ function placeIcon(p: PlaceOnWay): L.DivIcon {
   });
 }
 
+/** Mix two #rrggbb colours (k 0..1). */
+function mix(a: string, b: string, k: number): string {
+  const p = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  return `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * k)).join(",")})`;
+}
+
 /** Unpack the worker's flat road arrays into Leaflet polylines. */
 function lines(pts: Float32Array, off: Uint32Array): LatLon[][] {
   const out: LatLon[][] = [];
@@ -54,10 +71,12 @@ function lines(pts: Float32Array, off: Uint32Array): LatLon[][] {
 
 /** Dark street map: OpenStreetMap tiles in a night palette when online. The road network bundled in
  *  the app (major roads brighter) is drawn until tiles load and whenever they can't (offline). */
-export function MapCanvas({ center, bbox, path, start, end, me, changes, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
+export function MapCanvas({ center, bbox, layers, path, start, end, me, changes, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
+  const extra = useRef<L.LayerGroup | null>(null);
+  const extraRenderer = useRef<L.Canvas | null>(null);
   const pickRef = useRef(onPick);
   pickRef.current = onPick;
   const { t } = useT();
@@ -104,6 +123,9 @@ export function MapCanvas({ center, bbox, path, start, end, me, changes, places,
       L.polyline(lines(r.major, r.majorOff), { renderer, color: C.roadMajor, weight: 3, opacity: 1, interactive: false, smoothFactor: 1.5 }).addTo(roads);
     }).catch(() => {});
     layer.current = L.layerGroup().addTo(m);
+    m.createPane("layers").style.zIndex = "360";            // map layers: above the roads, below the way and pins
+    extraRenderer.current = L.canvas({ padding: 0.3, pane: "layers" });
+    extra.current = L.layerGroup().addTo(m);
     m.on("click", (e: L.LeafletMouseEvent) => pickRef.current?.(e.latlng.lat, e.latlng.lng));
     map.current = m;
     const ro = new ResizeObserver(() => m.invalidateSize());
@@ -113,6 +135,34 @@ export function MapCanvas({ center, bbox, path, start, end, me, changes, places,
       window.removeEventListener("online", online); window.removeEventListener("offline", sync);
     };
   }, [center.lat, center.lon, ...bbox]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- map layers ----
+  useEffect(() => {
+    const g = extra.current, renderer = extraRenderer.current;
+    if (!g || !renderer) return;
+    g.clearLayers();
+    const L_ = layers ?? {};
+    if (L_.night) L.imageOverlay(L_.night.url, L_.night.bounds, { pane: "layers", opacity: L_.night.strength, interactive: false }).addTo(g);
+    if (L_.heat?.cells.length) {
+      const vs = L_.heat.cells.map((c) => c[4]), lo = Math.min(...vs), hi = Math.max(...vs);
+      const col = (v: number) => { const k = hi > lo ? (v - lo) / (hi - lo) : 0.5; return k < 0.5 ? mix(C.good, C.warn, k * 2) : mix(C.warn, C.bad, (k - 0.5) * 2); };
+      for (const [s, w, n, e, v] of L_.heat.cells)
+        L.rectangle([[s, w], [n, e]], { renderer, stroke: false, fillColor: col(v), fillOpacity: L_.heat.strength * 0.75, interactive: false }).addTo(g);
+    }
+    if (L_.lit) {
+      L.polyline(lines(L_.lit.dark.pts, L_.lit.dark.off), { renderer, color: C.bad, weight: 4, opacity: 0.9, interactive: false }).addTo(g);
+      L.polyline(lines(L_.lit.lit.pts, L_.lit.lit.off), { renderer, color: C.warn, weight: 5, opacity: 1, interactive: false }).addTo(g);
+    }
+    for (const p of L_.help ?? []) {
+      const ring = p.state === "open" ? C.good : p.state === "maybe_open" ? C.warn : p.state === "closed" ? C.bad : C.soft;
+      L.marker([p.lat, p.lon], { pane: "layers", keyboard: false, title: p.name, icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
+        html: `<div style="width:26px;height:26px;border-radius:50%;background:${C.surface};border:3px ${p.state === "not_sure" ? "dashed" : "solid"} ${ring};opacity:${p.state === "closed" ? 0.55 : 1};display:flex;align-items:center;justify-content:center;font-size:13px">${PLACE_ICON[p.type] || "📍"}</div>` }) }).addTo(g);
+    }
+    for (const p of L_.weather ?? []) {
+      L.marker([p.lat, p.lon], { pane: "layers", keyboard: false, interactive: false, icon: L.divIcon({ className: "", iconSize: [54, 24], iconAnchor: [27, 12],
+        html: `<div style="background:${C.surface};border:1px solid ${C.edge};border-radius:12px;color:${C.ink};font:600 12px/22px ${THEME.font};text-align:center">${p.temp === null ? "?" : Math.round(p.temp) + "°"}${p.rain !== null && p.rain >= 40 ? " 💧" : ""}</div>` }) }).addTo(g);
+    }
+  }, [layers]);
 
   useEffect(() => {
     const m = map.current;
