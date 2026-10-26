@@ -13,6 +13,7 @@ import { setDemoActive } from "./lib/demoFlag";
 import { DeviationMonitor } from "./engine/deviation";
 import { fakeGps, useFakeGps, usePosition } from "./lib/position";
 import { call, listen } from "./lib/engine";
+import { useHereTraffic } from "./lib/here";
 import { useLive } from "./lib/live";
 import { freshFix, lastTrip, loadFlag, loadLastFix, loadPlace, myLocation, rememberTrip, saveFlag, saveLastFix, savePlace } from "./lib/saved";
 import { alertContact, mapLink, restoreRealBluetooth, smsHref } from "./sos";
@@ -87,6 +88,7 @@ function Main() {
   const seen = useRef(new Set<string>());
   const ask = useRef<TripAsk | null>(null);
   const conn = useLive(cfg?.center ?? null);
+  useHereTraffic(cfg?.bbox ?? null);
 
   // ---- boot: the engine loads the bundled city; a trip this phone already started carries on ----------
   useEffect(() => {

@@ -1,6 +1,6 @@
 // Live state: the fact store (what the planner may see), source on/off + last update, and the
 // simulator's ground truth (which the planner NEVER reads; it only learns through facts).
-import { LIVE_SOURCES, SOURCES, type SourceId } from "../config";
+import { CONFIG, LIVE_SOURCES, SOURCES, type SourceId } from "../config";
 import { confidence, status, view, type Fact, type FactView, type Status } from "./freshness";
 import type { Clock } from "./time";
 import { Rng } from "./util";
@@ -30,6 +30,7 @@ export class State {
   online = true;                 // phone has network: when false, no live information arrives
   pretendNightBuses = false;     // Demo "Pretend night buses run (simulated)": routes with unknown hours get assumed trips
   realWeather: Fact | null = null;   // latest real Open-Meteo observation (set by the app's probe)
+  realTraffic: { at: number; cells: Map<number, number> } | null = null;   // latest HERE traffic flow per traffic cell
   private seq = 0;
 
   constructor(public world: World, public clock: Clock, seed?: number) {
@@ -61,18 +62,26 @@ export class State {
     }
   }
 
+  /** HERE traffic is the traffic source: a reading came in and the app clock runs near real time
+   *  (a Demo jump to "23:00" plans on simulated traffic again). When HERE stops answering, it ages. */
+  realTrafficOn(): boolean {
+    return !!this.realTraffic && Math.abs(this.now() - Date.now()) < CONFIG.here.nearRealS * 1000;
+  }
+  synthetic(sid: SourceId): boolean { return sid === "traffic" ? !this.realTrafficOn() : SOURCES[sid].synthetic; }
+  ttlOf(sid: SourceId): number { return sid === "traffic" && this.realTrafficOn() ? CONFIG.here.trafficTtlS : SOURCES[sid].ttlS; }
+
   heartbeat(sid: SourceId): Fact | null {
     const s = this.sources[sid];
     const c = SOURCES[sid];
     const obs = c.live ? s.lastOk : s.enabled ? this.staticObservedAt(sid) : null;
     if (obs == null) return null;
-    return { key: `source:${sid}`, value: "ok", source: sid, synthetic: c.synthetic, observedAt: obs, ttlS: c.ttlS, reliability: c.reliability, kind: c.kind };
+    return { key: `source:${sid}`, value: "ok", source: sid, synthetic: this.synthetic(sid), observedAt: obs, ttlS: this.ttlOf(sid), reliability: c.reliability, kind: c.kind };
   }
 
   sourceView(sid: SourceId): FactView {
     const s = this.sources[sid];
     const note = s.enabled ? null : SOURCES[sid].live ? "switched off" : "unavailable";
-    return this.view(this.heartbeat(sid), { key: `source:${sid}`, source: sid, synthetic: SOURCES[sid].synthetic, note });
+    return this.view(this.heartbeat(sid), { key: `source:${sid}`, source: sid, synthetic: this.synthetic(sid), note });
   }
 
   /** Sample each source's status; return transitions (sid, old, new). */

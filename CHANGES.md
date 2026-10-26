@@ -40,3 +40,6 @@ Each request: what it was, which layer it touched, what was done.
 ## 10. UPGRADE U7: help ladder (tag up-7)
 - **Layer**: `sos/ladder.ts`, `sos/ble.ts` codes, engine `help()`, Help sheet, dispatch server (fire desk), Kotlin service flag, Demo drawer, copy (EN + HI), config.
 
+## 11. UPGRADE U8: HERE online extras (tag up-8)
+- **Layer**: new `lib/here.ts`, `demo/HereSection.tsx`; `MapCanvas.tsx` tile chain; engine `setRealTraffic` + State `realTraffic` / `synthetic()` / `ttlOf()`; feeds use HERE readings when present; config `map.provider`, `here.*`; `.env.example`, `.gitignore` (`.env.local`).
+

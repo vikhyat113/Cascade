@@ -96,6 +96,11 @@
 - Police → hospital → fire station → open place with people (Take me there / Call); 20 s per step, 8 s in demo; step log in the Demo drawer; "Reached N phones" over the mesh; fire desk on the dispatch server; Bluetooth checklist shows the foreground service.
 - Checks: 94 app tests (order, demo step time, hospital fallback, no false "aware", Bluetooth codes incl. fire); browser: police silent → hospital acknowledges → "Help is aware" (9 s escalation); nobody answers → police, hospital, fire → "Go where people are" (24 s); no errors.
 
+### U8: HERE online extras (done, tag up-8)
+- HERE night tiles (credit "© HERE") → OSM → bundled roads; HERE traffic flow as a real, ageing traffic source (simulated and labelled when HERE has no coverage or refuses); HERE transit cross-check in Demo 11; request counter, throttling, 3 min memory cache; Demo tile test (HERE fails / all tiles fail).
+- Checks: 99 app tests (flow parsing, real vs simulated traffic, ageing, clock jump, area filter, tile chain with and without a key); browser with a dummy key and every HERE request stubbed: HERE credit, traffic "Known 85%, real", HERE fails → OSM, all fail → roads, back to HERE, transit "no HERE transit data here (noCoverage)", refused key → OSM + "traffic is simulated"; no errors.
+- Waiting for: the real HERE key in `frontend/.env.local` (then rebuild the APK).
+
 ## Commands
 - Tests: `cd frontend && npm test` · SOS on every screen: `npm run build && npm run e2e` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 

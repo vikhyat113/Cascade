@@ -5,6 +5,7 @@ import { ago, anyLive, demo, OFFICIAL, type LogLine, type SimState, type Source,
 import { demoFlags, dispatch, getDispatchUrl, mesh, setDispatchUrl, useHelp } from "../sos";
 import { BleSection } from "./BleSection";
 import { FakeGpsSection } from "./FakeGpsSection";
+import { HereSection } from "./HereSection";
 import { LocationCheck } from "./LocationCheck";
 import { fireTimerSoon } from "../sos/safetyTimer";
 import { MeshGraph } from "./MeshGraph";
@@ -137,7 +138,7 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
               <li key={s.id} className="flex items-center justify-between gap-2 rounded-xl bg-raised px-3 py-2">
                 <span className="min-w-0">
                   <span className="font-semibold">{s.label}</span>
-                  <span className="ml-2 text-[0.85rem] text-soft">{s.synthetic ? "simulated" : "real (cached)"} · age {ago(s.age_s)}{!s.enabled ? " · switched off" : ""}</span>
+                  <span className="ml-2 text-[0.85rem] text-soft">{s.synthetic ? "simulated" : s.live ? "real" : "real (cached)"} · age {ago(s.age_s)}{!s.enabled ? " · switched off" : ""}</span>
                 </span>
                 <span className="shrink-0 rounded-full border px-2 py-0.5 text-[0.85rem] font-bold"
                   style={{ borderColor: OFFICIAL[s.status].color, color: OFFICIAL[s.status].color }}>
@@ -213,6 +214,10 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
 
         <Section id="gps" title="10. Location (simulated)">
           <FakeGpsSection view={view} />
+        </Section>
+
+        <Section id="here" title="11. HERE online extras (tiles, traffic, transit check)">
+          <HereSection view={view} />
         </Section>
       </div>
     </div>

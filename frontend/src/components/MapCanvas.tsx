@@ -3,6 +3,7 @@ import "leaflet/dist/leaflet.css";
 import { useEffect, useRef } from "react";
 import { useT } from "../copy";
 import { CONFIG } from "../config";
+import { countTile, onTileTest, setBasemap, tileChain } from "../lib/here";
 import { call } from "../lib/engine";
 import { THEME } from "../theme";
 import type { LatLon, PlaceOnWay } from "../types";
@@ -70,8 +71,9 @@ function lines(pts: Float32Array, off: Uint32Array): LatLon[][] {
   return out;
 }
 
-/** Dark street map: OpenStreetMap tiles in a night palette when online. The road network bundled in
- *  the app (major roads brighter) is drawn until tiles load and whenever they can't (offline). */
+/** Dark street map: HERE night tiles when a key exists (UPGRADE §9), else OpenStreetMap tiles in a night
+ *  palette. HERE fails -> OSM; OSM fails or offline -> the road network bundled in the app (major roads
+ *  brighter), which is also drawn until tiles load. Never two basemaps at once. */
 export function MapCanvas({ center, bbox, layers, path, start, end, me, changes, others, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -90,13 +92,21 @@ export function MapCanvas({ center, bbox, layers, path, start, end, me, changes,
     const m = L.map(box.current, { zoomControl: false, attributionControl: false, preferCanvas: true, minZoom: 12, maxZoom: CONFIG.map.maxZoom,
       maxBounds: bounds, maxBoundsViscosity: 0.9 })
       .setView([center.lat, center.lon], 14);
-    // the OpenStreetMap credit must stay visible: top-left under the status pill (SOS owns the top-right,
-    // the sheets cover the bottom)
-    L.control.attribution({ position: "topleft", prefix: false }).addTo(m);
-    const tiles = L.tileLayer(CONFIG.map.tileUrl, {
-      className: "nw-tiles", maxZoom: CONFIG.map.maxZoom,
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(m);
+    // the map credit (© HERE or © OpenStreetMap) must stay visible: top-left under the status pill (SOS
+    // owns the top-right, the sheets cover the bottom)
+    const credit = L.control.attribution({ position: "topleft", prefix: false }).addTo(m);
+    let chain = tileChain(), idx = 0;
+    const tiles = L.tileLayer(chain[0].url, { maxZoom: CONFIG.map.maxZoom }).addTo(m);
+    const use = (i: number) => {                             // switch the online basemap (url, night filter, credit)
+      credit.removeAttribution(chain[idx].attribution);
+      tiles.getContainer()?.classList.remove(chain[idx].className);
+      idx = i;
+      credit.addAttribution(chain[idx].attribution);
+      tiles.getContainer()?.classList.add(chain[idx].className);
+      tiles.setUrl(chain[idx].url);
+    };
+    credit.addAttribution(chain[0].attribution);
+    tiles.getContainer()?.classList.add(chain[0].className);
 
     // bundled roads: shown until tiles load, and again when tiles fail or the phone goes offline
     m.createPane("roads").style.zIndex = "350";             // above tiles, below the way, pins and dots (overlayPane is 400)
@@ -106,14 +116,23 @@ export function MapCanvas({ center, bbox, layers, path, start, end, me, changes,
     let tilesOk = false, errors = 0, shown: boolean | null = null;
     const sync = () => {
       const useTiles = tilesOk && navigator.onLine;
+      setBasemap(useTiles ? chain[idx].id : "roads");
       if (useTiles === shown) return;
       shown = useTiles;
       tiles.setOpacity(useTiles ? 1 : 0);
       if (useTiles) roads.remove(); else roads.addTo(m);
     };
-    tiles.on("tileload", () => { errors = 0; tilesOk = true; sync(); });
-    tiles.on("tileerror", () => { if (++errors >= CONFIG.map.tileErrorsBeforeRoads) { tilesOk = false; sync(); } });
-    const online = () => { errors = 0; tiles.redraw(); sync(); };     // signal back: try the tiles again
+    tiles.on("tileloadstart", () => { if (chain[idx].id === "here") countTile(null); });
+    tiles.on("tileload", () => { errors = 0; tilesOk = true; if (chain[idx].id === "here") countTile(true); sync(); });
+    tiles.on("tileerror", () => {
+      if (chain[idx].id === "here") countTile(false);
+      if (++errors < CONFIG.map.tileErrorsBeforeRoads) return;
+      errors = 0; tilesOk = false; sync();                   // roads while the next basemap loads
+      if (idx < chain.length - 1) use(idx + 1);
+    });
+    const restart = () => { errors = 0; tilesOk = false; chain = tileChain(); use(0); sync(); };
+    const online = () => restart();                          // signal back: try HERE (or OSM) again
+    const stopTest = onTileTest(restart);
     window.addEventListener("online", online);
     window.addEventListener("offline", sync);
     sync();
@@ -132,7 +151,7 @@ export function MapCanvas({ center, bbox, layers, path, start, end, me, changes,
     const ro = new ResizeObserver(() => m.invalidateSize());
     ro.observe(box.current);
     return () => {
-      stop = true; ro.disconnect(); m.remove(); map.current = null;
+      stop = true; stopTest(); ro.disconnect(); m.remove(); map.current = null;
       window.removeEventListener("online", online); window.removeEventListener("offline", sync);
     };
   }, [center.lat, center.lon, ...bbox]); // eslint-disable-line react-hooks/exhaustive-deps

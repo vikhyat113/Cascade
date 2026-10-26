@@ -106,6 +106,7 @@ const handlers = {
   roads,
   setOnline(on: boolean) { engine.setOnline(on); push(); },
   setRealWeather(current: Record<string, number | string | null>, observedAt: number) { engine.setRealWeather(current, observedAt); },
+  setRealTraffic(pts: { lat: number; lon: number; f: number }[], observedAt: number) { return engine.setRealTraffic(pts, observedAt); },
   // ---- Demo drawer -----------------------------------------------------------------------------
   outage(source: SourceArg, enabled: boolean) { engine.outage(source, enabled); engine.replanner.tickAll(); push(); },
   inject(ev: SimEvent) { const r = engine.inject(ev); engine.replanner.tickAll(); push(); return r; },

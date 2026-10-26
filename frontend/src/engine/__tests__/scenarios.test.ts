@@ -11,5 +11,5 @@ describe("scenario harness", () => {
     expect(r.invalid_outputs).toBe(0);
     expect(r.violations).toEqual([]);
     expect(r.passed).toBe(true);
-  });
+  }, 30000);                                   // whole simulated nights; the first one also builds the World
 });

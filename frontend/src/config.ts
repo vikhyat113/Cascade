@@ -95,12 +95,27 @@ export const CONFIG = {
     weatherProbeEveryS: 900,  // real Open-Meteo probe when online
     weatherProbeOkS: 1800,    // pill says Live if the last probe is newer than this
   },
+  here: {
+    // HERE Raster Tile API v3 (night style) and Traffic API v7 / Public Transit API v8. Free allowances are per
+    // product, so calls are throttled and answers cached in memory (never on disk, never for offline use)
+    tileUrl: "https://maps.hereapi.com/v3/base/mc/{z}/{x}/{y}/png",
+    tileStyle: "explore.night",
+    flowUrl: "https://data.traffic.hereapi.com/v7/flow",
+    transitUrl: "https://transit.router.hereapi.com/v8/routes",
+    traffic: true,            // use HERE traffic flow as the real traffic source when it answers
+    trafficEveryS: 180,       // poll while online
+    trafficTtlS: 600,         // a HERE reading counts as fresh this long, then it ages like any live source
+    nearRealS: 1800,          // only used while the app clock is this close to real time (not in a "23:00" demo jump)
+    cacheS: 180,              // same request inside this window -> the saved answer
+    minGapS: { tiles: 0, traffic: 60, transit: 10 } as Record<"tiles" | "traffic" | "transit", number>,
+  },
   area: {
     nearM: 300,               // "in the area": inside a zone or this close to one
   },
   map: {
-    // street map tiles when online (OpenStreetMap standard, light use with attribution); the road network
-    // bundled in the app takes over when tiles can't load, so the map always works offline
+    // online basemap: HERE night tiles when a key exists (UPGRADE §9), else OpenStreetMap standard (light use,
+    // with attribution). HERE fails -> OSM -> the road network bundled in the app, so the map always works offline
+    provider: ((import.meta.env.VITE_MAP_PROVIDER ?? (import.meta.env.VITE_HERE_API_KEY ? "here" : "osm")) === "here" ? "here" : "osm") as "here" | "osm",
     tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     maxZoom: 19,
     tileErrorsBeforeRoads: 3,

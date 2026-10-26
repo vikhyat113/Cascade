@@ -128,3 +128,13 @@ Decisions made without asking (per the working rules), with the reason for each.
 * **Fire desk**: added to the dispatch server (`to: fire`, Fire tab). Over Bluetooth the 2-bit desk code 3 now means fire; a test packet is an `ack` to code 3 (never a real acknowledgement, never posted).
 * **Bluetooth pre-flight**: the Demo checklist also shows whether the foreground service runs (MeshService flag). Help uses real Bluetooth only when it is on and running; otherwise the simulated mesh.
 
+## UPGRADE U8: HERE online extras (optional)
+
+* **Key**: `VITE_HERE_API_KEY` in `frontend/.env.local` (git-ignored; `frontend/.env.example` documents it). Vite bundles it into the app, so anyone with the APK can read it: **restrict the key in the HERE console** (allowed APIs, quotas). Built copies (`frontend/dist/`, `android/app/src/main/assets/public/`) are git-ignored.
+* **Provider**: `map.provider` = `here` when a key exists, else `osm` (`VITE_MAP_PROVIDER` overrides).
+* **Tiles**: HERE Raster Tile API v3, `https://maps.hereapi.com/v3/base/mc/{z}/{x}/{y}/png?style=explore.night&size=256` (URL and style checked against HERE's v3 docs), credit "© <year> HERE" top-left. Chain: HERE → (3 tile errors) OpenStreetMap with the night filter → (3 errors or offline) the bundled roads. One basemap at a time. Back online: start again at HERE. No HERE tile is saved for offline use (only the browser's normal HTTP cache).
+* **Traffic**: HERE Traffic API v7 flow for the area bbox (`locationReferencing=shape`), every 3 min at most while online. Each road piece's middle point becomes a speed factor (current / free-flow; closed = 0.1); the median per traffic cell feeds the engine as **real** facts (`synthetic: false`, note "HERE traffic flow", ttl 10 min). Cells HERE does not cover get no reading (not sure), never simulated ones. When HERE stops answering, the readings age (PROBABLE → OUTDATED → UNKNOWN). Empty answer → "no coverage", refused key → "denied": simulated traffic stays and the Demo data check says "simulated". Real traffic only applies while the app clock is within 30 min of real time; after a Demo jump ("23:00") traffic is simulated again and labelled so.
+* **Transit cross-check**: Demo drawer section 11 only, HERE Public Transit v8 for the best way's start and end; shows HERE's ways next to ours, or "no HERE transit data here". Never used for planning.
+* **Limits**: per-product request counter in Demo 11; minimum gap 60 s (traffic) and 10 s (transit); answers cached in memory for 3 min.
+* **Source id**: UPGRADE calls it `traffic_live`. The app keeps the existing `traffic` source and switches its label to "Traffic speeds (HERE live)" and `synthetic` to false while HERE feeds it, so every consumer (risk, pill, Demo) reads one source.
+
