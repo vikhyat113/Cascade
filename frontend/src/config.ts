@@ -81,13 +81,16 @@ export const CONFIG = {
     weatherProbeEveryS: 900,  // real Open-Meteo probe when online
     weatherProbeOkS: 1800,    // pill says Live if the last probe is newer than this
   },
+  area: {
+    nearM: 300,               // "in the area": inside a zone or this close to one
+  },
   map: {
     // street map tiles when online (OpenStreetMap standard, light use with attribution); the road network
     // bundled in the app takes over when tiles can't load, so the map always works offline
     tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     maxZoom: 19,
     tileErrorsBeforeRoads: 3,
-    boundsFactor: 2.5,        // the map can be panned this many area-radii from the centre (data stops at 1)
+    boundsPadM: 3000,         // the map can be panned this far beyond the zones (data stops at the zone edge)
   },
   dispatch: {
     // the phone reaches the laptop over Wi-Fi: set VITE_DISPATCH_URL at build time or in the Demo drawer

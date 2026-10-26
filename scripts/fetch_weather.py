@@ -16,9 +16,10 @@ URL = "https://api.open-meteo.com/v1/forecast"
 
 
 def main():
+    z = (CFG.get("area", {}).get("zones") or [CFG["center"]])[0]      # the main city zone, not the empty midpoint
     params = {
-        "latitude": CFG["center"]["lat"],
-        "longitude": CFG["center"]["lon"],
+        "latitude": z["lat"],
+        "longitude": z["lon"],
         "hourly": "temperature_2m,precipitation_probability,precipitation,rain,wind_speed_10m,weather_code,visibility",
         "current": "temperature_2m,precipitation,rain,wind_speed_10m,weather_code",
         "timezone": CFG["timezone"],

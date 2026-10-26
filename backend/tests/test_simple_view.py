@@ -47,7 +47,7 @@ def fixture_plan(pid="p1", kind="bus", labels=("Recommended", "Safest"), safety_
         "segments": [seg("walk", iso(2, 15), iso(2, 21)),
                      seg("wait", iso(2, 21), iso(2, 25), route_id="N1", haven=None),
                      seg("bus", iso(2, 25), iso(2, 40), route_id="N1", to="12/22"),
-                     seg("walk", iso(2, 40), iso(2, 45), to="Home (Sector 12)")],
+                     seg("walk", iso(2, 40), iso(2, 45), to="Home (Dharampeth)")],
         "walk_m": walk_m, "distance_m": 4000, "outdoor_min": 12, "warnings": [], "safe_havens": [],
         "open_along": [], "depends_on": [c["name"] for c in crit],
     }
@@ -60,7 +60,7 @@ def fixture_set(*plans, deadline=iso(3, 0), log=None):
 
 
 def view(ps, lang="en", now=NOW):
-    return SimpleView(ps, lang=lang, now=now, cfg=CFG, dest={"name": "Home (Sector 12)", "kind": "home"}).build()
+    return SimpleView(ps, lang=lang, now=now, cfg=CFG, dest={"name": "Home (Dharampeth)", "kind": "home"}).build()
 
 
 def opt(v, oid="safest"):

@@ -12,12 +12,12 @@ export function LocationCheck() {
       const [cfg, perm] = await Promise.all([call("init"), Geolocation.checkPermissions().catch(() => null)]);
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
       const { latitude: lat, longitude: lon, accuracy } = pos.coords;
-      const c = cfg.center;
-      const km = Math.hypot((lat - c.lat) * 110.54, (lon - c.lon) * 111.32 * Math.cos((c.lat * Math.PI) / 180));
-      const inside = km * 1000 <= cfg.radius_m;
+      const [hit, used] = await Promise.all([call("areaHit", lat, lon), call("inArea", lat, lon)]);
+      const km = hit.distM / 1000;
       setOut(`GPS works: ${lat.toFixed(5)}, ${lon.toFixed(5)} (±${Math.round(accuracy)} m), permission ${perm?.location ?? "?"}. ` +
-        `${km < 10 ? `${km.toFixed(2)} km` : `${Math.round(km)} km`} from the ${cfg.city_name} centre; the app has data for ${cfg.radius_m / 1000} km around it. ` +
-        (inside ? "Inside: “My location” uses this fix." : "Outside: the app uses the demo start point (“My location (demo)”). Rebuild the data for this area to use it."));
+        (hit.inside ? `Inside the zone “${hit.zone}”. ` : `${km < 10 ? km.toFixed(2) : Math.round(km)} km from the nearest zone (“${hit.zone}”). `) +
+        `The app has data for: ${cfg.zones.map((z) => z.name).join(", ")}. ` +
+        (used ? "“My location” uses this fix." : "Outside: the app uses the demo start point (“My location (demo)”)."));
     } catch (e) {
       setOut(`No GPS fix: ${(e as Error)?.message ?? e}. Check Location is on and NightWay has location permission.`);
     } finally {

@@ -1,5 +1,5 @@
 { "id": "bus_cancelled", "name": "2. Bus cancelled", "seed": 42,
   "description": "Same trip without cabs. The night bus the plan uses is cancelled at 02:12; live bus info reports it and the plan must change, with a Backup.",
-  "request": { "from": "work", "to": "home", "finish": "02:15", "by": "03:00", "modes": ["walk", "bus"], "maxWalkM": 4000 },
+  "request": { "from": "bus:start", "to": "bus:end", "finish": "02:15", "by": "03:00", "modes": ["walk", "bus"], "maxWalkM": 4000 },
   "events": [{ "t": "02:12", "type": "bus_cancelled" }],
   "expect": { "never_unknown_as_value": true, "always_has_plan": true, "plan_changed": true, "backup_offered": true } }

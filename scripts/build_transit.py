@@ -35,16 +35,9 @@ BUS_PATTERNS = [
 ANCHORS = [(315, 135), (45, 225)]
 COLORS = ["#f59e0b", "#22d3ee", "#a78bfa", "#34d399", "#fb7185", "#facc15", "#60a5fa"]
 # persona corridors get a pattern each, so every demo persona has a realistic bus option
-PERSONA_PATTERN = {"call_centre": 0, "nurse": 1, "security_guard": 3, "delivery_worker": 2, "factory_worker": 1}
+PERSONA_PATTERN = {"late_shift": 0, "iiit_student": 1, "railway_porter": 3}
 
-METRO_LINES = [
-    {"id": "BLUE", "name": "Metro Blue Line", "color": "#3b82f6",
-     "stations": ["New Ashok Nagar", "Noida Sector 15", "Noida Sector 16", "Noida Sector 18",
-                  "Botanical Garden", "Noida Golf Course", "Noida City Centre"]},
-    {"id": "MAGENTA", "name": "Metro Magenta Line", "color": "#d946ef",
-     "stations": ["Jamia Millia Islamia", "Okhla Vihar", "Jasola Vihar Shaheen Bagh", "Kalindi Kunj",
-                  "Okhla Bird Sanctuary", "Botanical Garden"]},
-]
+METRO_LINES: list[dict] = []     # Nagpur Metro lines come from OSM route relations (UPGRADE U4)
 METRO_SERVICE = [{"from": "05:30", "to": "23:15", "headway_min": 8}]
 
 
@@ -79,7 +72,8 @@ def route_waypoints(stops, proj, pois):
     by_name = {p["name"]: p for p in pois if p.get("name")}
     out = []
     for per in CFG.get("personas", []):
-        o, h = by_name.get(per["origin"]), by_name.get(per["home"])
+        o = per.get("origin_at") or by_name.get(per["origin"])
+        h = per.get("home_at") or by_name.get(per["home"])
         if not o or not h:
             continue
         ox, oy = proj.xy(o["lat"], o["lon"])
@@ -93,11 +87,15 @@ def route_waypoints(stops, proj, pois):
         wps = [w for k, w in enumerate(wps) if k == 0 or w != wps[k - 1]]
         if len(set(wps)) >= 2:
             out.append((wps, PERSONA_PATTERN.get(per["id"], 1)))
-    R = CFG["radius_m"] * 0.75
-    for k, (a_deg, b_deg) in enumerate(ANCHORS):
-        pair = [nearest_stop(sx, sy, stops, R * math.sin(math.radians(d)), R * math.cos(math.radians(d)))
-                for d in (a_deg, b_deg)]
-        out.append((pair, 3 if k else 1))
+    # cross-town routes inside each full-detail zone (the area is zones, not one circle)
+    for z in CFG.get("area", {}).get("zones", []):
+        zx, zy = proj.xy(z["lat"], z["lon"])
+        R = z["radius_m"] * 0.75
+        for k, (a_deg, b_deg) in enumerate(ANCHORS):
+            pair = [nearest_stop(sx, sy, stops, zx + R * math.sin(math.radians(d)), zy + R * math.cos(math.radians(d)))
+                    for d in (a_deg, b_deg)]
+            if pair[0] != pair[1]:
+                out.append((pair, 3 if k else 1))
     return out
 
 

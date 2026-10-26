@@ -72,7 +72,7 @@ function Main() {
         setHome(await loadPlace("home", c.ui_defaults));
         setWork(await loadPlace("work", c.ui_defaults));
         setBy(c.ui_defaults.deadline);
-        setFrom(await myLocation(c.ui_defaults, c.center, c.radius_m));
+        setFrom(await myLocation(c.ui_defaults));
         setLateAlertState(await loadFlag("lateAlert"));
         restoreRealBluetooth({ title: t("label.appName"), text: t("line.meshOn") }).catch(() => {});
         const saved = await lastTrip();
@@ -269,7 +269,7 @@ function Main() {
   const demo = { showDemo: SHOW_DEMO, onDemo: () => setDemoOpen(true) };
   return (
     <div className="relative h-full overflow-hidden">
-      <MapCanvas center={cfg.center} radiusM={cfg.radius_m} bottomPad={sheetH} topPad={screen === "trip" ? 150 : 80} {...mapView}
+      <MapCanvas center={cfg.center} bbox={cfg.bbox} bottomPad={sheetH} topPad={screen === "trip" ? 150 : 80} {...mapView}
         onPick={screen === "pick" ? async (lat, lon) => {
           const name = (await call("where", lat, lon).catch(() => null)) || t("label.pickedPoint");
           choosePlace({ lat, lon, name }, field === "to" ? pickSave : null);

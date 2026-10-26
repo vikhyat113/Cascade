@@ -17,9 +17,13 @@ export interface RouteJson { id: string; name: string; mode: string; color?: str
 export interface ScheduleJson { generated_at: string | null; synthetic: boolean; routes: RouteJson[] }
 export interface MetaJson {
   city_name: string; center: { lat: number; lon: number }; radius_m: number; tz_offset_min: number; seed: number;
+  zones?: Zone[];            // the area is named zones (data/area.geojson); center/radius only enclose them
   ui_defaults: { home: { lat: number; lon: number; name: string }; work: { lat: number; lon: number; name: string }; start: { lat: number; lon: number; name: string }; deadline: string | null };
   generated_at: string; sample: boolean; real: string[]; synthetic: string[];
 }
+export interface Zone { id: string; name: string; detail: "full" | "major"; ring: [number, number][] }
+export interface AreaHit { inside: boolean; distM: number; zone: string | null }
+
 export interface Bundle { graph: GraphJson; pois: PoiJson[]; places: PlaceJson[]; weather: WeatherJson; incidents: IncidentsJson; schedule: ScheduleJson; meta: MetaJson }
 
 export const MAIN = new Set(["motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link"]);
@@ -260,7 +264,42 @@ export class World {
     return out;
   }
 
-  inArea(lat: number, lon: number): boolean { return Math.hypot(this.proj.x(lon), this.proj.y(lat)) <= this.meta.radius_m + 300; }
+  inArea(lat: number, lon: number): boolean { return this.areaHit(lat, lon).distM <= CONFIG.area.nearM; }
+
+  /** Inside a zone (distance 0), else how far to the nearest zone edge. No zones: the old circle. */
+  areaHit(lat: number, lon: number): AreaHit {
+    const zones = this.meta.zones ?? [];
+    const x = this.proj.x(lon), y = this.proj.y(lat);
+    if (!zones.length) {
+      const d = Math.max(0, Math.hypot(x, y) - this.meta.radius_m);
+      return { inside: d === 0, distM: d, zone: null };
+    }
+    let best: AreaHit = { inside: false, distM: Infinity, zone: null };
+    for (const z of zones) {
+      const pts = z.ring.map(([la, lo]) => [this.proj.x(lo), this.proj.y(la)] as const);
+      let inside = false, d = Infinity;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const [xi, yi] = pts[i], [xj, yj] = pts[j];
+        if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+        const dx = xj - xi, dy = yj - yi, L2 = dx * dx + dy * dy;
+        const k = L2 ? Math.max(0, Math.min(1, ((x - xi) * dx + (y - yi) * dy) / L2)) : 0;
+        d = Math.min(d, Math.hypot(x - xi - k * dx, y - yi - k * dy));
+      }
+      if (inside) return { inside: true, distM: 0, zone: z.name };
+      if (d < best.distM) best = { inside: false, distM: d, zone: z.name };
+    }
+    return best;
+  }
+
+  /** [south, west, north, east] around every zone (map pan limit). */
+  bbox(): [number, number, number, number] {
+    const pts = (this.meta.zones ?? []).flatMap((z) => z.ring);
+    if (!pts.length) {
+      const dLat = this.meta.radius_m / 110540, dLon = this.meta.radius_m / (111320 * Math.cos((this.meta.center.lat * Math.PI) / 180));
+      return [this.meta.center.lat - dLat, this.meta.center.lon - dLon, this.meta.center.lat + dLat, this.meta.center.lon + dLon];
+    }
+    return [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
+  }
 
   // ---- offline search -----------------------------------------------------------------------------
   geocode(q: string, limit = 6): { name: string; lat: number; lon: number; kind: string }[] {
@@ -269,7 +308,7 @@ export class World {
     const nums = nq.match(/\d+/g) ?? [];
     const scored: [number, (typeof this.places)[number]][] = [];
     for (const p of this.places) {
-      if (nums.length && !nums.every((n) => (p.norm.match(/\d+/g) ?? ([] as string[])).includes(n))) continue;  // "sector 12" never becomes "sector 18"
+      if (nums.length && !nums.every((n) => (p.norm.match(/\d+/g) ?? ([] as string[])).includes(n))) continue;  // "plot 12" must never become "plot 18"
       let s = p.norm === nq ? 3 : p.norm.startsWith(nq) ? 2.2 : p.norm.includes(nq) ? 1.8 : 0;
       if (!s) { const words = nq.split(" "); s = words.every((w) => p.norm.includes(w)) ? 1.4 : 0; }
       if (!s) continue;

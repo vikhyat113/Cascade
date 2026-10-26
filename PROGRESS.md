@@ -48,6 +48,17 @@
 - Native Capacitor plugin in Kotlin (`frontend/android/app/src/main/java/org/cascade/nightway/mesh/`), `BleMeshTransport` in `src/sos/ble.ts`, Demo drawer 9. Flag `MESH_REAL` off by default; any failure falls back to the simulated mesh.
 - Builds and all 56 tests pass. **Not yet verified between two phones**: steps in docs/BLE_STATUS.md; results to be recorded there.
 
+## UPGRADE (branch nightway-nagpur, see UPGRADE.md / UPGRADE_AUDIT.md)
+
+### U1: Nagpur and Butibori (done, tag up-1)
+- Area = 3 named zones in `data/area.geojson` (`scripts/area.py`): Nagpur core (4 km around Sitabuldi), Butibori + IIIT Nagpur (3.2 km), Wardha Road corridor (500 m along 25.3 km of NH-44, found by routing on OSM main roads).
+- Places geocoded once with Nominatim (`scripts/geocode_places.py`, cached). IIIT Nagpur's permanent campus is not named in OSM: Waranga village stands in (**to confirm**).
+- Rebuilt: walk graph (full detail in zones, major roads in the corridor; 13,872 segments: 933 km Nagpur, 142 km Butibori, 67 km corridor), drive graph (derived from it), POIs (272 hospitals, 26 metro stations, only 10 bus stops in OSM), weather (Nagpur), synthetic incidents. Bundle 2.5 MB.
+- App: "in the area" = inside / within 300 m of a zone; GPS outside → demo start (IIIT Nagpur); map pans within the zones + 3 km; Demo 5 location check names the zone.
+- Bus tests and scenarios 2/5 run along whatever bus route exists (`bus:start` / `bus:end`), so they test timetable logic, not one city's routes.
+- Checks: 56 app tests + 53 Python backend tests pass; browser run on the new city works (plan 0.9 s for IIIT → Dharampeth).
+- Unverified: planning time on the phone for the 25 km trip; Waranga as IIIT stand-in.
+
 ## Commands
 - Tests: `cd frontend && npm test` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 

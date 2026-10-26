@@ -260,7 +260,7 @@ class StaticWorld:
         scored = []
         for pl in self.places:
             if nums and not nums.issubset(set(re.findall(r"\d+", pl.norm))):
-                continue          # "sector 12" must never silently become "sector 18"
+                continue          # "plot 12" must never silently become "plot 18" (numbered places)
             if pl.norm == nq:
                 s = 3.0
             elif pl.norm.startswith(nq):
@@ -300,8 +300,9 @@ class StaticWorld:
     def _personas(self) -> list[dict]:
         out = []
         for p in self.cfg.get("personas", []):
-            o = self.geocode(p["origin"], 1)
-            h = self.geocode(p["home"], 1)
+            # exact points (origin_at / home_at, from geocoding) win over a name search in the gazetteer
+            o = [p["origin_at"]] if p.get("origin_at") else self.geocode(p["origin"], 1)
+            h = [p["home_at"]] if p.get("home_at") else self.geocode(p["home"], 1)
             c = {"lat": self.center[0], "lon": self.center[1]}
             out.append({**p,
                         "origin_point": {"lat": o[0]["lat"], "lon": o[0]["lon"], "name": o[0]["name"]} if o

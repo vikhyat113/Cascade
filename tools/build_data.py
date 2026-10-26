@@ -32,7 +32,18 @@ sys.path.insert(0, str(ROOT / "backend"))
 LIT_YES = {"yes", "24/7", "automatic", "sunset-sunrise", "interval", "dusk-dawn", "limited"}
 LIT_NO = {"no", "disused"}
 POI_TYPES = {"hospital", "clinic", "pharmacy", "police", "fire_station", "fuel", "atm", "food", "shop",
-             "bus_stop", "metro_station", "rail_station", "toilets", "bank"}
+             "bus_stop", "metro_station", "rail_station", "toilets", "bank", "hotel"}
+
+
+def zones() -> list[dict]:
+    """The named zones (data/area.geojson, built by scripts/area.py) as [lat, lon] rings for the app."""
+    p = ROOT / "data" / "area.geojson"
+    if not p.exists():
+        return []
+    fc = json.loads(p.read_text(encoding="utf-8"))
+    return [{"id": f["properties"]["id"], "name": f["properties"]["name"], "detail": f["properties"]["detail"],
+             "ring": [[round(lat, 5), round(lon, 5)] for lon, lat in f["geometry"]["coordinates"][0]]}
+            for f in fc["features"]]
 
 
 def write(name: str, obj) -> int:
@@ -166,18 +177,19 @@ def build_real():
         "city_name": cfg["city_name"], "center": {"lat": st.center[0], "lon": st.center[1]},
         "radius_m": st.radius, "timezone": cfg["timezone"], "tz_offset_min": 330, "seed": st.seed,
         "night_hours": cfg["risk"].get("night_hours", [19, 6]),
-        "ui_defaults": {"home": per["home_point"], "work": per["origin_point"], "start": per["origin_point"],
+        "zones": zones(),
+        "ui_defaults": {"home": per["home_point"], "work": per["origin_point"], "start": d.get("start_at") or per["origin_point"],
                         "deadline": d.get("deadline")},
         "generated_at": now, "sample": False,
-        "real": ["street graph (OSM)", "places + opening hours (OSM)", "street lamps / lit tags (OSM)",
-                 "weather snapshot (Open-Meteo)", "bus-stop locations (OSM)"],
+        "real": ["street graph (OSM)", "places + opening hours (OSM)", "lit tags (OSM)",
+                 "weather snapshot (Open-Meteo)", "bus-stop and metro-station locations (OSM)", "area zones (OSM main road)"],
         "synthetic": ["incident history", "bus timetable", "traffic", "live bus status", "road closures",
                       "cab / auto availability"],
     }
     return graph, pois, places, weather, incidents, sched, meta
 
 
-def build_sample(center_lat=28.5705, center_lon=77.3229, city="Sample city"):
+def build_sample(center_lat=21.145, center_lon=79.078, city="Sample city"):
     """Tiny synthetic city (7x7 blocks) so the app always runs without downloads. ALL synthetic."""
     step, n = 200.0, 9
     kx = 111320.0 * math.cos(math.radians(center_lat))
@@ -213,7 +225,7 @@ def build_sample(center_lat=28.5705, center_lon=77.3229, city="Sample city"):
         "id": "S1", "name": "Sample bus S1", "mode": "bus", "color": "#f59e0b",
         "stops": [{"id": f"b{i}", "name": f"Stop {i + 1}", "lat": nodes[i * 2][0], "lon": nodes[i * 2][1]} for i in range(5)],
         "seg_s": [90] * 4, "service": [{"from": "21:00", "to": "05:00", "headway_min": 20}], "both_directions": True}]}
-    meta = {"city_name": city, "center": {"lat": center_lat, "lon": center_lon}, "radius_m": 1200,
+    meta = {"city_name": city, "center": {"lat": center_lat, "lon": center_lon}, "radius_m": 1200, "zones": [],
             "timezone": "Asia/Kolkata", "tz_offset_min": 330, "seed": 1, "night_hours": [19, 6],
             "ui_defaults": {"home": {**places[0], "name": "Sample Home"}, "work": {**places[1], "name": "Sample Work"},
                             "start": {**places[1], "name": "Sample Work"}, "deadline": "03:00"},

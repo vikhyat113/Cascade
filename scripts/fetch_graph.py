@@ -9,6 +9,7 @@ import sys
 
 import osmnx as ox
 
+import area
 from common import CFG, DATA, RAW, utc_now_iso, write_json
 
 
@@ -62,42 +63,77 @@ def export_pack(G, directed: bool, path):
     write_json(path, pack, compress=True)
 
 
-def download(network_type: str):
+def _setup():
     ox.settings.use_cache = True
     ox.settings.cache_folder = str(RAW / "osmnx_cache")
     ox.settings.http_user_agent = CFG["user_agent"]
     ox.settings.overpass_rate_limit = False
     ox.settings.requests_timeout = 300
     ox.settings.useful_tags_way = list(set(ox.settings.useful_tags_way + ["lit", "sidewalk"]))
-    center = (CFG["center"]["lat"], CFG["center"]["lon"])
+
+
+def _from_polygon(poly, **kw):
     last = None
     for url in CFG["overpass_urls"]:
         ox.settings.overpass_url = url.rsplit("/interpreter", 1)[0]
         try:
-            print(f"  downloading {network_type} graph via {ox.settings.overpass_url}")
-            return ox.graph_from_point(center, dist=CFG["radius_m"], network_type=network_type, simplify=True)
+            return ox.graph_from_polygon(poly, simplify=False, retain_all=True, **kw)
         except Exception as e:
             last = e
-            print(f"    failed: {e!r}")
+            print(f"    failed via {ox.settings.overpass_url}: {e!r}")
     sys.exit(f"could not download graph: {last!r}")
+
+
+def download(network_type: str):
+    """Zones with detail=full get the whole network; the corridor only its major roads (UPGRADE §2).
+    Downloaded unsimplified, joined (shared OSM node ids connect them), then simplified once."""
+    import networkx as nx
+
+    _setup()
+    major = CFG["area"]["corridor"]["major_highways"]
+    parts = []
+    for props, poly in area.polygons():
+        if props["detail"] == "full":
+            print(f"  {network_type}: {props['name']} (full detail)")
+            parts.append(_from_polygon(poly, network_type=network_type))
+        else:
+            print(f"  {network_type}: {props['name']} (major roads only)")
+            parts.append(_from_polygon(poly, custom_filter=f'["highway"~"^({major})$"]'))
+    G = nx.compose_all(parts)
+    G = ox.simplify_graph(G)
+    G = ox.truncate.largest_component(G, strongly=False)   # the zones must connect through the corridor
+    print(f"  {network_type}: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges after joining")
+    return G
+
+
+DRIVABLE = {"motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary", "secondary_link",
+            "tertiary", "tertiary_link", "residential", "unclassified", "living_street", "service", "road"}
+
+
+def drive_from_walk(W):
+    """Car roads taken from the walk download (no second Overpass query: fair use, and the servers
+    are often at capacity). Only the Python reference backend and the bus-route builder use it."""
+    keep = [(u, v, k) for u, v, k, d in W.edges(keys=True, data=True)
+            if (first(d.get("highway")) or "") in DRIVABLE and d.get("access") not in ("no", "private")]
+    G = W.edge_subgraph(keep).copy()
+    G = ox.truncate.largest_component(G, strongly=False)
+    G = ox.add_edge_speeds(G)
+    return ox.add_edge_travel_times(G)
 
 
 def main():
     force = "--force" in sys.argv
-    for nt in ("walk", "drive"):
-        gml = RAW / f"{nt}.graphml"
-        if gml.exists() and not force:
-            print(f"  loading cached {gml.name}")
-            G = ox.load_graphml(gml)
-        else:
-            G = download(nt)
-            if nt == "drive":
-                G = ox.add_edge_speeds(G)
-                G = ox.add_edge_travel_times(G)
-            ox.save_graphml(G, gml)
-        if nt == "walk":
-            G = ox.convert.to_undirected(G)
-        export_pack(G, directed=(nt == "drive"), path=DATA / f"graph_{nt}.json.gz")
+    gml = RAW / "walk.graphml"
+    if gml.exists() and not force:
+        print(f"  loading cached {gml.name}")
+        W = ox.load_graphml(gml)
+    else:
+        W = download("walk")
+        ox.save_graphml(W, gml)
+    export_pack(ox.convert.to_undirected(W), directed=False, path=DATA / "graph_walk.json.gz")
+    D = drive_from_walk(W)
+    print(f"  drive (from walk): {D.number_of_nodes()} nodes, {D.number_of_edges()} edges")
+    export_pack(D, directed=True, path=DATA / "graph_drive.json.gz")
 
 
 if __name__ == "__main__":

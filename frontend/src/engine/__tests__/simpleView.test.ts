@@ -14,7 +14,7 @@ const cat = (name: string, status: Plan["trust"]["status"], critical = true, det
 function plan(o: Partial<Plan> & { cats?: ReturnType<typeof cat>[]; feas?: [boolean, boolean, boolean] } = {}): Plan {
   const cats = o.cats ?? [cat("closures", "KNOWN")];
   const crit = cats.filter((c) => c.critical);
-  const seg = (mode: Plan["segments"][number]["mode"], a: number, b: number, extra = {}) => ({ mode, label: mode, from: "A", to: "Sector 28",
+  const seg = (mode: Plan["segments"][number]["mode"], a: number, b: number, extra = {}) => ({ mode, label: mode, from: "A", to: "Sitabuldi",
     start: { best: a, expected: a, worst: a }, end: { best: b, expected: b, worst: b }, durationS: { best: 300, expected: 360, worst: 420 }, distanceM: 420,
     coords: [[28.57, 77.32], [28.58, 77.33]] as [number, number][], risk: {}, safety: { lo: 60, hi: 80 }, status: "KNOWN" as const, facts: [], ...extra });
   return {
@@ -23,7 +23,7 @@ function plan(o: Partial<Plan> & { cats?: ReturnType<typeof cat>[]; feas?: [bool
     feasible: Object.fromEntries(["best", "expected", "worst"].map((k, i) => [k, (o.feas ?? [true, true, true])[i]])),
     safety: o.safety ?? { lo: 70, hi: 85 }, risk: o.risk ?? Object.fromEntries(["lighting", "incident", "isolation", "traffic", "weather", "emergency"].map((k) => [k, { lo: 0.1, hi: 0.3 }])),
     trust: { status: "KNOWN", confidence: 0.7, limiting: crit[0]?.name ?? null, overall: "KNOWN", categories: cats },
-    segments: [seg("walk", at(2, 15), at(2, 21)), seg("wait", at(2, 21), at(2, 25), { routeId: "N1" }), seg("bus", at(2, 25), at(2, 40), { routeId: "N1", to: "12/22" }), seg("walk", at(2, 40), at(2, 45), { to: "Home (Sector 12)" })],
+    segments: [seg("walk", at(2, 15), at(2, 21)), seg("wait", at(2, 21), at(2, 25), { routeId: "N1" }), seg("bus", at(2, 25), at(2, 40), { routeId: "N1", to: "Khurana" }), seg("walk", at(2, 40), at(2, 45), { to: "Home (Dharampeth)" })],
     distanceM: 4000, walkM: o.walkM ?? 800, outdoorMin: 12, warnings: [], safeHavens: [], openAlong: o.openAlong ?? [], dependsOn: crit.map((c) => c.name), explanation: "x", leaveAdvice: null,
   };
 }
@@ -33,7 +33,7 @@ function set(plans: Plan[], o: Partial<PlanSet> = {}): PlanSet {
     feasibilityLevel: "worst", noFeasible: false, warnings: [], notes: [], weather: { key: "w", value: null, status: "UNKNOWN", confidence: 0, source: "x", ageS: null, synthetic: false, kind: null, note: null },
     closures: [], havensNearOrigin: [], pinnedInvalid: null, userLocked: true, changeLog: [], ...o };
 }
-const build = (ps: PlanSet, lang: "en" | "hi" = "en", now = NOW) => new SimpleViewBuilder(ps, lang, now, city, "live", { name: "Home (Sector 12)", kind: "home" }).build();
+const build = (ps: PlanSet, lang: "en" | "hi" = "en", now = NOW) => new SimpleViewBuilder(ps, lang, now, city, "live", { name: "Home (Dharampeth)", kind: "home" }).build();
 const tab = (v: ReturnType<typeof build>, id = "safest") => v.options.find((o) => o.id === id)!;
 
 describe("simple view mapping", () => {
@@ -95,7 +95,7 @@ describe("simple view mapping", () => {
 describe("simple view on the live engine", () => {
   it("is plain, and says 'Bus time is a guess.' after bus info is lost", () => {
     const e = testEngine();
-    e.plan(workHome(e, { modes: ["walk", "bus"], finish: "02:20", by: "03:30" }));
+    e.plan(workHome(e, { modes: ["walk", "bus"], finish: "02:20", by: "03:30", along: "bus" }));
     const v1 = e.view("en")!;
     expect(userTexts(v1).length).toBeGreaterThan(5);
     expect(plainViolations(v1)).toEqual([]);

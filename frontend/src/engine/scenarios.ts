@@ -33,8 +33,17 @@ export const SCENARIOS: Scenario[] = Object.values(import.meta.glob<Scenario>(".
 /** The night all scenarios replay on: the night of the saved weather snapshot (so the forecast exists). */
 export function scenarioNight(w: World): number { return w.weatherFetchedAt ?? Date.parse(w.meta.generated_at); }
 
-function point(w: World, ref: string) {
+/** "home" / "work" (demo defaults), "bus:start" / "bus:end" (ends of the first bus route, so bus
+ *  scenarios test the timetable logic on whatever routes the area has), or a place name. */
+export function point(w: World, ref: string) {
   const d = w.meta.ui_defaults;
+  const bus = /^bus:(start|end)$/.exec(ref);
+  if (bus) {
+    const r = [...w.routes.values()].find((x) => x.mode === "bus" && x.stops.length >= 2);
+    if (!r) throw new Error("no bus route in this area");
+    const s = bus[1] === "start" ? r.stops[0] : r.stops[r.stops.length - 1];
+    return { lat: s.lat, lon: s.lon, name: s.name };
+  }
   if (ref === "home") return { ...d.home, kind: "home" as const };
   if (ref === "work") return { ...d.work, kind: "work" as const };
   const hit = w.geocode(ref, 1)[0];

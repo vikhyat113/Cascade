@@ -91,7 +91,7 @@ def dist_text(m: float, t: T) -> str:
 
 
 def short_place(name: Optional[str]) -> str:
-    """'Police Station Sector-12 (Noida)' -> 'Police Station Sector-12'; keeps lines short."""
+    """'Sitabuldi Police Station (Nagpur)' -> 'Sitabuldi Police Station'; keeps lines short."""
     if not name:
         return ""
     n = re.split(r"\s*[(,]", name)[0].strip()

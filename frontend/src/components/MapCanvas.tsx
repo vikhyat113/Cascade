@@ -10,7 +10,7 @@ import { PLACE_ICON } from "./icons";
 
 type Props = {
   center: { lat: number; lon: number };
-  radiusM: number;          // the area the app has data for
+  bbox: [number, number, number, number];   // [south, west, north, east] of the zones the app has data for
   path?: LatLon[] | null;
   start?: LatLon | null;
   end?: LatLon | null;
@@ -53,7 +53,7 @@ function lines(pts: Float32Array, off: Uint32Array): LatLon[][] {
 
 /** Dark street map: OpenStreetMap tiles in a night palette when online. The road network bundled in
  *  the app (major roads brighter) is drawn until tiles load and whenever they can't (offline). */
-export function MapCanvas({ center, radiusM, path, start, end, me, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
+export function MapCanvas({ center, bbox, path, start, end, me, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
@@ -63,10 +63,9 @@ export function MapCanvas({ center, radiusM, path, start, end, me, places, fitKe
 
   useEffect(() => {
     if (!box.current) return;
-    // keep the map near the area the app has data for (roads, places): no panning off into nothing
-    const r = radiusM * CONFIG.map.boundsFactor;
-    const dLat = r / 110540, dLon = r / (111320 * Math.cos((center.lat * Math.PI) / 180));
-    const bounds = L.latLngBounds([center.lat - dLat, center.lon - dLon], [center.lat + dLat, center.lon + dLon]);
+    // keep the map near the zones the app has data for (roads, places): no panning off into nothing
+    const pad = CONFIG.map.boundsPadM, dLat = pad / 110540, dLon = pad / (111320 * Math.cos((center.lat * Math.PI) / 180));
+    const bounds = L.latLngBounds([bbox[0] - dLat, bbox[1] - dLon], [bbox[2] + dLat, bbox[3] + dLon]);
     const m = L.map(box.current, { zoomControl: false, attributionControl: false, preferCanvas: true, minZoom: 12, maxZoom: CONFIG.map.maxZoom,
       maxBounds: bounds, maxBoundsViscosity: 0.9 })
       .setView([center.lat, center.lon], 14);
@@ -111,7 +110,7 @@ export function MapCanvas({ center, radiusM, path, start, end, me, places, fitKe
       stop = true; ro.disconnect(); m.remove(); map.current = null;
       window.removeEventListener("online", online); window.removeEventListener("offline", sync);
     };
-  }, [center.lat, center.lon, radiusM]);
+  }, [center.lat, center.lon, ...bbox]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const m = map.current;

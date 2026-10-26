@@ -10,7 +10,7 @@
 ## The story
 
 **1. The problem (20 s)**
-"Priya finishes her shift at 2:15 AM in Noida and must be home by 3:00. The metro is closed. Which way is safe, and will she make it?"
+"Priya finishes her shift at 2:15 AM in Sitabuldi, Nagpur, and must be home in Dharampeth by 3:00. Buses have stopped. Which way is safe, and will she make it?"
 
 **2. Plan in three taps (30 s)**
 - Demo → **3. Time → Set to 2:15 AM** → Close. (The demo works in the daytime; all night logic uses the app's clock.)

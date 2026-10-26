@@ -82,7 +82,8 @@ const handlers = {
   async init() {
     await ready;
     const m = engine.world.meta;
-    return { city_name: m.city_name, center: m.center, radius_m: m.radius_m, ui_defaults: m.ui_defaults, real: m.real, synthetic: m.synthetic, sample: m.sample };
+    return { city_name: m.city_name, center: m.center, radius_m: m.radius_m, zones: (m.zones ?? []).map((z) => ({ id: z.id, name: z.name, ring: z.ring })),
+      bbox: engine.world.bbox(), ui_defaults: m.ui_defaults, real: m.real, synthetic: m.synthetic, sample: m.sample };
   },
   setLang(l: Lang) { lang = l; push(true); },
   plan(a: TripAsk) { lastAsk = a; chosenTab = null; engine.plan(request(a)); const v = plainView(); lastView = JSON.stringify(v); return v; },
@@ -96,6 +97,7 @@ const handlers = {
   endTrip() { lastAsk = null; chosenTab = null; engine.endTrip(); push(true); },
   where(lat: number, lon: number) { return engine.world.nearestPlaceName(lat, lon); },
   inArea(lat: number, lon: number) { return engine.world.inArea(lat, lon); },
+  areaHit(lat: number, lon: number) { return engine.world.areaHit(lat, lon); },
   geocode(q: string) { return engine.world.geocode(q); },
   needNow(type: string, lat: number, lon: number) { return engine.needNow(type, lat, lon, lang); },
   help(lat: number, lon: number) { return engine.help(lat, lon, lang); },

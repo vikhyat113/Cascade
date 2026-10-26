@@ -7,7 +7,7 @@ Branch `nightway-android` starts from `main` at `e6d8b36` ("ini frontend"). The 
 | Area | What it is | State |
 |---|---|---|
 | `backend/` | Python FastAPI engine: facts + freshness (4 statuses, decay, weakest-link), street-graph routing (scipy Dijkstra), 6-part risk intervals, opening-hours parser, transit (timetable + realtime), cab model, live feed simulator, planner (walk / bus / cab, best-expected-worst arrival, Safest/Balanced/Fastest, Plan B, leave advice), re-planner with hysteresis + change log, plain-language simple view, need-now, heatmap, 8 scenarios | **Works**: 53 pytest tests (~2 s), 8/8 scenarios pass with 0 invalid outputs |
-| `data/` | Cached real data for **Noida (Sector 18, 4 km)**: OSMnx walk/drive packs, 371 OSM facilities + 21 lamps, Open-Meteo forecast; hand-built night timetable on real stops; seeded synthetic incident history | Works offline |
+| `data/` | Cached real data for the first demo area (replaced by **Nagpur and Butibori** in UPGRADE U1): OSMnx walk/drive packs, 371 OSM facilities + 21 lamps, Open-Meteo forecast; hand-built night timetable on real stops; seeded synthetic incident history | Works offline |
 | `scripts/` | fetch_graph / fetch_pois / fetch_weather / build_transit / gen_incidents / fetch_all, run_scenarios, record_demo | Works (needs internet only to re-download) |
 | `frontend/` | React + Vite + TS + Tailwind **simple phone UI** (Home → Result → Trip → Open now, Help, Demo drawer), Leaflet map, copy deck `src/copy/en.ts` + `hi.ts` + banned-word/length test (Vitest), service worker | Works against the Python server; builds clean |
 | docs | README, ASSUMPTIONS, DEMO, screenshots | Describe the web version |
@@ -30,6 +30,6 @@ The new spec says **the phone does the thinking**: engine in TypeScript, data bu
 
 * **Capacitor 6.2** (not 7): Capacitor 7 needs JDK 21; the spec and this machine use JDK 17. Capacitor 6.2 = Android Gradle Plugin 8.2, compileSdk 34, minSdk 22.
 * React 18 + Vite 6 + TypeScript + Tailwind v4 + Leaflet (canvas renderer) + Vitest: already in `frontend/`.
-* Demo area: the repo already defines it (`backend/config.yaml`: Noida, center 28.5705, 77.3229, radius 4 km), so the "FILL THESE 3 LINES" block is not needed. The spec's 2.5 km default would cut off the demo persona's home in Sector 12 (3 km from the centre), so the bundled graph keeps the repo's 4 km radius. It stays well under the 8 MB limit; see PROGRESS.md for sizes.
+* Demo area: the repo already defines it (`backend/config.yaml`; the area later moved to Nagpur and Butibori, UPGRADE U1), so the "FILL THESE 3 LINES" block is not needed. The spec's 2.5 km default would cut off the demo persona's home in Sector 12 (3 km from the centre), so the bundled graph keeps the repo's 4 km radius. It stays well under the 8 MB limit; see PROGRESS.md for sizes.
 
 **Phase 4:** the old Help sheet (nearest hospital/police + share link, `screens/Trip.tsx`) was replaced by `screens/Help.tsx` (three choices, escalation ladder, Text my contact); the share-link feature needed the Python server and is dropped in the APK. The previous version stays in git history (tag `phase-3`).

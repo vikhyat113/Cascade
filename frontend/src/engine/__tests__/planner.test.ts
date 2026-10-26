@@ -34,7 +34,7 @@ describe("planner on the bundled city", () => {
     const e = testEngine();
     e.outage("transit_realtime", false);
     e.advance(120 * 11);
-    const { all } = planFull(e.state, workHome(e, { modes: ["walk", "bus"], finish: "02:20", by: "03:30" }), e.cache);
+    const { all } = planFull(e.state, workHome(e, { modes: ["walk", "bus"], finish: "02:20", by: "03:30", along: "bus" }), e.cache);
     const bus = all.filter((p) => p.kind === "bus");
     expect(bus.length).toBeGreaterThan(0);
     const tt = bus[0].trust.categories.find((c) => c.name === "transit_timing")!;

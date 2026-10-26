@@ -18,3 +18,7 @@ Each request: what it was, which layer it touched, what was done.
 ## 3. Real Bluetooth relay (Phase 7, commit "native added")
 - **Layer**: native plugin (Kotlin), sos transport, Demo drawer. Off by default (`MESH_REAL`); see docs/BLE_STATUS.md.
 
+## 4. UPGRADE U1: area moved to Nagpur and Butibori (tag up-1)
+- **Layer**: data build scripts (`scripts/area.py`, `geocode_places.py`, `fetch_graph.py`, `fetch_pois.py`, `fetch_weather.py`, `build_transit.py`), `tools/build_data.py`, config, engine (`world.ts` zones), map bounds, location check.
+- Zones instead of one radius; every Noida reference removed outside `legacy/`. Old Noida data stays in git history.
+
