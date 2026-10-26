@@ -43,7 +43,6 @@ export const CONFIG = {
   risk: {
     weights: { lighting: 0.24, incident: 0.24, isolation: 0.2, traffic: 0.1, weather: 0.1, emergency: 0.12 },
     trafficCellM: 500,
-    cabZoneM: 1000,
     vehicleFactor: 0.35,
     transitRideFactor: 0.3,
     safeHavenWaitRisk: 0.08,
@@ -63,10 +62,17 @@ export const CONFIG = {
     safeHavenRadiusM: 200,
     busSpeedMps: 7,
   },
-  cab: { baseWaitMin: { 22: 5, 23: 6, 0: 7, 1: 9, 2: 11, 3: 12, 4: 10, 5: 7 } as Record<number, number> },
+  transit: {
+    maxTransfers: 2,          // changes between vehicles (A -> C -> B is one)
+    transferRadiusM: 250,     // walk between stops to change
+    transferPenaltyS: 300,    // per change: prefer direct trips when they are about as fast
+    unknownHeadwayMin: 30,    // expected wait when even the headway is unknown
+    clusterM: 60,             // stops this close with the same name are one place
+    maxItineraries: 4,
+  },
   presentation: {
-    // UI_SPEC suggests 75 / 50; worst-case scores here sit between ~40 (long dark walk) and ~72 (cab),
-    // so they are calibrated so a cab reads Safe, a night bus OK and a long unlit walk Be careful.
+    // UI_SPEC suggests 75 / 50; worst-case scores here sit between ~40 (long dark walk) and ~72 (inside a
+    // vehicle most of the way), calibrated so a bus ride reads Safe/OK and a long unlit walk Be careful.
     safeMin: 66,
     okMin: 55,
     bannerMaxAgeS: 600,

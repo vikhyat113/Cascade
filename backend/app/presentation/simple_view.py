@@ -46,6 +46,12 @@ def load_copy(lang: str) -> dict:
         table = {}
     if lang != "en":
         table = {**load_copy("en"), **table}
+    legacy = COPY_DIR.parent.parent.parent / "backend" / "app" / "presentation" / "legacy_copy.json"
+    try:                                             # cab strings left the app's copy deck in UPGRADE U4
+        old = json.loads(legacy.read_text(encoding="utf-8"))
+        table = {**old.get("en", {}), **old.get(lang, {}), **table}
+    except (OSError, ValueError):
+        pass
     return table
 
 

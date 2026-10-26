@@ -15,6 +15,7 @@ type Props = {
   start?: LatLon | null;
   end?: LatLon | null;
   me?: LatLon | null;
+  changes?: LatLon[];       // stops where the way changes bus / metro
   places?: PlaceOnWay[];
   fitKey?: string;
   bottomPad: number;
@@ -53,7 +54,7 @@ function lines(pts: Float32Array, off: Uint32Array): LatLon[][] {
 
 /** Dark street map: OpenStreetMap tiles in a night palette when online. The road network bundled in
  *  the app (major roads brighter) is drawn until tiles load and whenever they can't (offline). */
-export function MapCanvas({ center, bbox, path, start, end, me, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
+export function MapCanvas({ center, bbox, path, start, end, me, changes, places, fitKey, bottomPad, topPad = 80, onPick }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
@@ -123,10 +124,11 @@ export function MapCanvas({ center, bbox, path, start, end, me, places, fitKey, 
       L.polyline(path, { color: ACCENT, weight: 6, opacity: 1, interactive: false }).addTo(g);
     }
     if (start) L.circleMarker(start, { radius: 8, color: ACCENT, weight: 4, fillColor: C.ink, fillOpacity: 1 }).addTo(g);
+    for (const c of changes ?? []) L.circleMarker(c, { radius: 7, color: C.ink, weight: 3, fillColor: C.warn, fillOpacity: 1, interactive: false }).addTo(g);
     if (end) L.marker(end, { icon: pinIcon(), keyboard: false }).addTo(g);
     (places || []).forEach((p) => L.marker([p.lat, p.lon], { icon: placeIcon(p), title: p.name, alt: p.name }).addTo(g));
     if (me) L.marker(me, { icon: L.divIcon({ className: "", html: '<div class="nw-me"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(g);
-  }, [path, start, end, me, places]);
+  }, [path, start, end, me, places, changes]);
 
   useEffect(() => {
     const m = map.current;

@@ -14,7 +14,7 @@ export interface Truth {
   rain: string | null; rainSince: number | null;
   closures: Map<string, Closure>; lifted: Map<string, [number, Closure]>;
   cancelledTrips: Set<string>; tripDelay: Map<string, number>; scheduleConflicts: Map<string, number>;
-  accidents: Map<number, number>; cabMultiplier: number;
+  accidents: Map<number, number>;
 }
 
 export interface EventEntry { seq: number; t: number; kind: string; message: string; severity: "info" | "warn" | "alert" }
@@ -22,12 +22,13 @@ export interface EventEntry { seq: number; t: number; kind: string; message: str
 export class State {
   store = new Map<string, Fact>();
   sources: Record<SourceId, SourceState>;
-  truth: Truth = { rain: null, rainSince: null, closures: new Map(), lifted: new Map(), cancelledTrips: new Set(), tripDelay: new Map(), scheduleConflicts: new Map(), accidents: new Map(), cabMultiplier: 1 };
+  truth: Truth = { rain: null, rainSince: null, closures: new Map(), lifted: new Map(), cancelledTrips: new Set(), tripDelay: new Map(), scheduleConflicts: new Map(), accidents: new Map() };
   rng: Rng;
   events: EventEntry[] = [];
   eventSeq = 0;
   version = 0;
   online = true;                 // phone has network: when false, no live information arrives
+  pretendNightBuses = false;     // Demo "Pretend night buses run (simulated)": routes with unknown hours get assumed trips
   realWeather: Fact | null = null;   // latest real Open-Meteo observation (set by the app's probe)
   private seq = 0;
 

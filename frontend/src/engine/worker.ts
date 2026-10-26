@@ -51,7 +51,7 @@ function request(a: TripAsk): PlanRequest {
   const start = a.when ? city.atNight(a.when, now) : now;
   const pt = (p: Spot): Point => ({ lat: p.lat, lon: p.lon, name: p.name || engine.world.nearestPlaceName(p.lat, p.lon) || "", kind: p.kind === "home" || p.kind === "work" ? p.kind : null });
   return { origin: pt(a.from), destination: pt(a.to), start, deadline: a.by ? city.atNight(a.by, start) : null,
-    modes: a.modes ?? ["walk", "bus", "cab"], riskWeight: 1, maxWalkM: 2500 };
+    modes: a.modes ?? ["walk", "bus", "metro"], riskWeight: 1, maxWalkM: 2500 };
 }
 
 /** After the clock moves (or the night is reset), plan the same trip again for the new time. */
@@ -114,8 +114,10 @@ const handlers = {
     push(true);
   },
   advance(seconds: number) { engine.advance(seconds); engine.replanner.tickAll(); push(true); },
+  /** Demo: "Pretend night buses run (simulated)". Routes with unknown hours get assumed trips. */
+  setPretend(on: boolean) { engine.state.pretendNightBuses = on; engine.state.logEvent("demo", on ? "pretend night buses: ON (simulated)" : "pretend night buses: off"); engine.replanner.tickAll(); push(true); },
   timing() { const c = engine.clock as AppClock; return { deadline: engine.active?.planset?.deadline ?? null, now: c.now(), speed: c.paused ? 0 : c.speed }; },
-  clock() { const c = engine.clock as AppClock; return { now: c.now(), speed: c.speed, paused: c.paused, now_text: engine.world.city.clock(c.now()) ?? "", rain: engine.state.truth.rain }; },
+  clock() { const c = engine.clock as AppClock; return { now: c.now(), speed: c.speed, paused: c.paused, now_text: engine.world.city.clock(c.now()) ?? "", rain: engine.state.truth.rain, pretend: engine.state.pretendNightBuses }; },
   sources() { return Object.fromEntries(Object.entries(engine.state.sources).map(([k, v]) => [k, v.enabled])); },
   trust() { return engine.trust(); },
   details() { return engine.active?.planset ?? null; },

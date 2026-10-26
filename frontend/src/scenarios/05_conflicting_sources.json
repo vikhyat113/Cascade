@@ -1,5 +1,1 @@
-{ "id": "conflicting_sources", "name": "5. Timetable vs live bus", "seed": 42,
-  "description": "The timetable says the bus is on time; live bus info says 15 min late. The newer observation wins and the timetable is marked OUTDATED.",
-  "request": { "from": "bus:start", "to": "bus:end", "finish": "02:15", "by": "03:00", "modes": ["walk", "bus"], "maxWalkM": 4000 },
-  "events": [{ "t": "02:06", "type": "schedule_conflict", "params": { "delay_s": 900 } }],
-  "expect": { "never_unknown_as_value": true, "always_has_plan": true, "conflict_flagged": true } }
+{"id": "conflicting_sources", "name": "5. Timetable vs live bus", "seed": 42, "description": "The timetable says the bus is on time; live bus info says 15 min late. The newer observation wins and the timetable is marked OUTDATED. (Simulated night buses: no route here has real night hours.)", "request": {"from": "bus:start", "to": "bus:end", "finish": "02:15", "by": "03:00", "modes": ["walk", "bus"], "maxWalkM": 4000}, "events": [{"t": "02:06", "type": "schedule_conflict", "params": {"delay_s": 900}}], "expect": {"never_unknown_as_value": true, "always_has_plan": true, "conflict_flagged": true}, "pretend_night_buses": true}

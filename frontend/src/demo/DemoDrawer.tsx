@@ -88,6 +88,12 @@ export default function DemoDrawer({ view, onClose }: { view: SimpleView | null;
             <Act label="Accident" disabled={!planId} onClick={() => act(() => demo.inject("accident", { edge_selector: "main_road_nearest_route" }), "Accident on the way")} />
           </div>
           {!planId && <p className="mt-2 text-[0.9rem] text-soft">Find a way first: these act on the current trip.</p>}
+          <button onClick={() => act(() => demo.pretend(!sim?.pretend), sim?.pretend ? "Night buses: real hours only" : "Pretend night buses run (SIMULATED): routes with unknown hours get assumed trips")}
+            disabled={!sim} aria-pressed={!!sim?.pretend}
+            className={`mt-2 flex min-h-12 w-full items-center justify-between rounded-2xl border px-4 font-semibold disabled:opacity-40 ${sim?.pretend ? "border-warn/60 bg-warn/10" : "border-edge bg-raised"}`}>
+            <span>Pretend night buses run (simulated)</span><span className={sim?.pretend ? "text-warn" : "text-soft"}>{sim?.pretend ? "ON" : "off"}</span>
+          </button>
+          <p className="mt-1 text-[0.85rem] text-soft">No Nagpur bus route has real night hours (docs/TRANSIT_DATA.md): E1-E4 are estimated, the Metro runs 06:00-22:00. Off: buses are “Not sure”.</p>
         </Section>
 
         <Section id="time" title="3. Time">

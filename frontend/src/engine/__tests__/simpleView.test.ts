@@ -51,17 +51,22 @@ describe("simple view mapping", () => {
   });
   it("says 'Bus time is a guess.' on timetable-only timing, with a Backup", () => {
     const bus = plan({ cats: [cat("transit_timing", "PROBABLE", true, "N1 02:34: timetable only (no live)"), cat("closures", "KNOWN")] });
-    const cab = plan({ id: "p2", kind: "cab", labels: ["Fastest"], cats: [cat("cab_availability", "PROBABLE"), cat("closures", "KNOWN")] });
-    const o = tab(build(set([bus, cab])));
-    expect(o.warning).toMatchObject({ text: "Bus time is a guess.", pill: "Likely", backup_option_id: "fastest" });
+    const walk = plan({ id: "p2", kind: "walk", labels: ["Fastest"], cats: [cat("weather", "KNOWN"), cat("closures", "KNOWN")] });
+    const o = tab(build(set([bus, walk])));
+    expect(o.warning).toMatchObject({ text: "Bus time is a guess.", pill: "Likely", backup_option_id: "fastest", safe_wait: false });
   });
-  it("treats a PROBABLE cab wait as normal unless it could make you late", () => {
-    expect(tab(build(set([plan({ kind: "cab", cats: [cat("cab_availability", "PROBABLE"), cat("closures", "KNOWN")] })]))).warning).toBeNull();
-    expect(tab(build(set([plan({ kind: "cab", feas: [true, true, false], cats: [cat("cab_availability", "PROBABLE"), cat("closures", "KNOWN")] })]))).warning?.text).toBe("Cab wait is a guess.");
+  it("says 'Not sure buses run now.' when hours are not known, and offers waiting somewhere safe when nothing else runs", () => {
+    const bus = plan({ cats: [cat("transit_timing", "UNKNOWN", true, "E1: service hours not known (estimated route)"), cat("closures", "KNOWN")] });
+    expect(tab(build(set([bus])))).toMatchObject({ warning: { text: "Not sure buses run now.", pill: "Not sure", backup_option_id: null, safe_wait: true } });
+  });
+  it("says a change of bus in plain words", () => {
+    const p = plan();
+    p.segments[1] = { ...p.segments[1], change: true };
+    expect(tab(build(set([p]))).steps[1].text).toBe("Change here. Wait about 6 min.");
   });
   it("flags old or unknown critical info in plain words", () => {
-    expect(tab(build(set([plan({ kind: "cab", cats: [cat("traffic", "OUTDATED"), cat("closures", "KNOWN")] })]))).warning).toMatchObject({ text: "Traffic info is old.", pill: "Old info" });
-    expect(tab(build(set([plan({ kind: "cab", cats: [cat("traffic", "UNKNOWN"), cat("closures", "KNOWN")] })]))).warning).toMatchObject({ text: "Not sure about traffic.", pill: "Not sure" });
+    expect(tab(build(set([plan({ kind: "walk", cats: [cat("weather", "UNKNOWN"), cat("closures", "KNOWN")] })]))).warning).toMatchObject({ text: "Not sure about rain.", pill: "Not sure" });
+    expect(tab(build(set([plan({ kind: "walk", cats: [cat("closures", "OUTDATED"), cat("weather", "KNOWN")] })]))).warning).toMatchObject({ text: "Road info is old.", pill: "Old info" });
   });
   it("never claims lit roads unless mapped", () => {
     const p = plan({ kind: "walk", cats: [cat("closures", "KNOWN"), cat("lighting", "PROBABLE", false)] });
@@ -93,8 +98,9 @@ describe("simple view mapping", () => {
 });
 
 describe("simple view on the live engine", () => {
-  it("is plain, and says 'Bus time is a guess.' after bus info is lost", () => {
+  it("is plain, and says 'Bus time is a guess.' after bus info is lost (simulated night buses)", () => {
     const e = testEngine();
+    e.state.pretendNightBuses = true;
     e.plan(workHome(e, { modes: ["walk", "bus"], finish: "02:20", by: "03:30", along: "bus" }));
     const v1 = e.view("en")!;
     expect(userTexts(v1).length).toBeGreaterThan(5);
@@ -106,6 +112,16 @@ describe("simple view on the live engine", () => {
     const bus = v2.options.filter((o) => o.kind === "bus");
     expect(bus.length).toBeGreaterThan(0);
     expect(bus[0].warning?.text).toBe("Bus time is a guess.");
+  });
+  it("never invents night buses: unknown hours say 'Not sure buses run now.' with a Backup", () => {
+    const e = testEngine();
+    e.plan(workHome(e, { modes: ["walk", "bus"], finish: "02:20", by: "03:30", along: "bus" }));
+    const v = e.view("en")!;
+    expect(plainViolations(v)).toEqual([]);
+    const bus = v.options.filter((o) => o.kind === "bus");
+    expect(bus.length).toBeGreaterThan(0);
+    expect(bus[0].warning?.text).toBe("Not sure buses run now.");
+    expect(bus[0].warning?.backup_option_id !== null || bus[0].warning?.safe_wait === true).toBe(true);
   });
   it("open now never calls an unknown-hours place open", () => {
     const e = testEngine();

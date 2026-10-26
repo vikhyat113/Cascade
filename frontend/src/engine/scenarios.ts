@@ -16,6 +16,7 @@ export interface Scenario {
   id: string; name: string; description?: string; seed?: number; start?: string; end?: string;
   request: { from: string; to: string; finish?: string; by?: string; modes?: Mode[]; maxWalkM?: number };
   events: SimEvent[]; offline_start?: boolean; unavailable?: SourceId[];
+  pretend_night_buses?: boolean;          // Demo switch "Pretend night buses run (simulated)"
   checks?: { type: "need_now"; kind: string; disable?: SourceId }[];
   expect: Record<string, unknown>;
 }
@@ -37,11 +38,12 @@ export function scenarioNight(w: World): number { return w.weatherFetchedAt ?? D
  *  scenarios test the timetable logic on whatever routes the area has), or a place name. */
 export function point(w: World, ref: string) {
   const d = w.meta.ui_defaults;
-  const bus = /^bus:(start|end)$/.exec(ref);
-  if (bus) {
-    const r = [...w.routes.values()].find((x) => x.mode === "bus" && x.stops.length >= 2);
+  const end = /^bus:(start|end)$/.exec(ref);
+  if (end) {
+    const bus = [...w.routes.values()].filter((x) => x.mode === "bus" && x.stops.length >= 4);
+    const r = bus.sort((a, b) => a.segS.reduce((x, y) => x + y, 0) - b.segS.reduce((x, y) => x + y, 0))[0];   // the shortest: timing tests
     if (!r) throw new Error("no bus route in this area");
-    const s = bus[1] === "start" ? r.stops[0] : r.stops[r.stops.length - 1];
+    const s = end[1] === "start" ? r.stops[0] : r.stops[r.stops.length - 1];
     return { lat: s.lat, lon: s.lon, name: s.name };
   }
   if (ref === "home") return { ...d.home, kind: "home" as const };
@@ -63,25 +65,30 @@ export function runScenario(w: World, sc: Scenario): ScenarioResult {
   const eng = new Engine(w, clock, { live: false, warmup: false, seed: sc.seed ?? 42 });
   const s = eng.state;
   if (sc.offline_start) { setSource(s, "all_live", false); s.online = false; }
+  if (sc.pretend_night_buses) s.pretendNightBuses = true;
   for (const sid of sc.unavailable ?? []) setSource(s, sid, false);
   if (!sc.offline_start) eng.feeds.warmup(300);
   (eng as unknown as { last: number }).last = clock.now();
   const req: PlanRequest = { origin: point(w, sc.request.from), destination: point(w, sc.request.to), start: finish, deadline,
-    modes: sc.request.modes ?? ["walk", "bus", "cab"], riskWeight: 1, maxWalkM: sc.request.maxWalkM ?? 2500 };
+    modes: sc.request.modes ?? ["walk", "bus", "metro"], riskWeight: 1, maxWalkM: sc.request.maxWalkM ?? 2500 };
   const ap = eng.plan(req);
   const pending = [...sc.events].sort((a, b) => at(a.t!) - at(b.t!));
   const samples: ScenarioResult["timeline"] = [];
   const violations: string[] = [];
   let planB = false, conflict = false, hasPlanAll = true;
   const cats: Record<string, Status>[] = [];
+  const etas: (number | null)[] = [];
+  let usedCancelled = false;               // a cancelled trip still in the recommended way once live info reports it
   const sample = () => {
     const ps = ap.planset!;
     const view = eng.view("en")!;
     for (const v of [...validatePlanSet(ps), ...plainViolations(view).map((x) => `plain view: ${x}`)]) if (violations.length < 20) violations.push(`${w.city.hhmm(clock.now())} ${v}`);
     const rec = ps.plans.find((p) => p.id === ps.recommendedId);
-    planB ||= !!ps.planB;
+    planB ||= !!ps.planB || view.options.some((o) => o.warning?.safe_wait);     // a Backup way, or waiting somewhere safe
     conflict ||= ps.plans.some((p) => p.warnings.some((x) => x.includes("Conflicting sources")));
     hasPlanAll &&= !!rec;
+    etas.push(rec?.eta.expected ?? null);
+    usedCancelled ||= !!rec?.segments.some((x) => x.tripId && s.truth.cancelledTrips.has(x.tripId) && s.statusOf(s.get(`transit:rt:${x.tripId}`)) !== "UNKNOWN");
     samples.push({ t: w.city.hhmm(clock.now()), status: rec?.trust.status ?? "UNKNOWN", confidence: rec?.trust.confidence ?? 0, safety_lo: rec?.safety.lo ?? null });
     cats.push(Object.fromEntries((rec?.trust.categories ?? []).map((c) => [c.name, c.status])));
   };
@@ -114,6 +121,12 @@ export function runScenario(w: World, sc: Scenario): ScenarioResult {
   if (e.never_unknown_as_value) { const b = violations.filter((v) => v.includes("UNKNOWN")); chk("never_unknown_as_value", !b.length, b[0] ?? "no UNKNOWN fact carried a value"); }
   if ("plan_changed" in e) chk("plan_changed", switches.length > 0 === e.plan_changed, `${switches.length} switch(es)`);
   if (e.backup_offered) chk("backup_offered", planB, `Plan B seen: ${planB}`);
+  if (e.adapts) {                          // a cancelled bus: switch to another way or move to a later bus, never keep the cancelled one
+    const first = etas.find((x) => x !== null) ?? null, last = [...etas].reverse().find((x) => x !== null) ?? null;
+    const later = first !== null && last !== null && last - first >= 60000;
+    chk("adapts", !usedCancelled && (switches.length > 0 || later),
+      `${switches.length} switch(es), arrival ${first ? w.city.hhmm(first) : "-"} -> ${last ? w.city.hhmm(last) : "-"}, cancelled trip kept: ${usedCancelled}`);
+  }
   if (e.always_has_plan) chk("always_has_plan", hasPlanAll, `${samples.length} steps`);
   if (e.still_on_time === "yes") { const ps = ap.planset!; const rec = ps.plans.find((p) => p.id === ps.recommendedId); chk("still_on_time", !!rec?.feasible.worst, `final ${JSON.stringify(rec?.feasible)}`); }
   if (e.confidence_drops) chk("confidence_drops", conf0 - minConf >= 0.1, `${conf0.toFixed(2)} -> ${minConf.toFixed(2)}`);

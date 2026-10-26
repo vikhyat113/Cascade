@@ -25,3 +25,6 @@ Each request: what it was, which layer it touched, what was done.
 ## 5. UPGRADE U5: SOS on every screen (tag up-5)
 - **Layer**: new component `SosButton`, App (Help opens with the best place), Help sheet (last place / no place), copy (EN + HI), layout (pill left, cards lower), e2e test.
 
+## 6. UPGRADE U4: cab removed, Metro + estimated buses, transfers (tag up-4)
+- **Layer**: data (`scripts/build_transit.py`, docs/TRANSIT_DATA.md), engine (`transit.ts` itinerary search, `planner.ts`, `simpleView.ts`, `services.ts` speed-up, `risk.ts` closures), copy (EN + HI), Result steps, map change markers, Demo switch.
+

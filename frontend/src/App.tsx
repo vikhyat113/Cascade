@@ -216,8 +216,8 @@ function Main() {
 
   const openNeed = async (type: string) => {
     if (!from) return;
-    const n = NEEDS.find((x) => x.type === type)!;
-    const base = { type, title: t(n.key as CopyKey), places: null, empty: null };
+    const n = NEEDS.find((x) => x.type === type);
+    const base = { type, title: n ? t(n.key as CopyKey) : t("label.safePlaces"), places: null, empty: null };
     setNeed(base);
     setScreen("opennow");
     try {
@@ -253,6 +253,7 @@ function Main() {
   };
 
   const onBackup = (id: string) => {
+    if (id === "safe") { openNeed("safe"); return; }
     setShownId(id);
     setScreen("result");
   };
@@ -260,11 +261,11 @@ function Main() {
   // ---- map for each screen ---------------------------------------------------------------------
   const mapView = useMemo(() => {
     if ((screen === "result") && shown) {
-      return { path: shown.path, start: shown.start, end: shown.end, places: showPlaces ? shown.places : [],
+      return { path: shown.path, start: shown.start, end: shown.end, changes: shown.changes, places: showPlaces ? shown.places : [],
                fitKey: `r-${view?.id}-${shown.id}-${showPlaces}` };
     }
     if (screen === "trip" && current) {
-      return { path: current.path, start: current.start, end: current.end, me: view?.trip?.position ?? null,
+      return { path: current.path, start: current.start, end: current.end, changes: current.changes, me: view?.trip?.position ?? null,
                fitKey: `t-${view?.id}-${current.plan_id}` };
     }
     if (screen === "opennow") {

@@ -182,9 +182,10 @@ def build_real():
                         "deadline": d.get("deadline")},
         "generated_at": now, "sample": False,
         "real": ["street graph (OSM)", "places + opening hours (OSM)", "lit tags (OSM)",
-                 "weather snapshot (Open-Meteo)", "bus-stop and metro-station locations (OSM)", "area zones (OSM main road)"],
-        "synthetic": ["incident history", "bus timetable", "traffic", "live bus status", "road closures",
-                      "cab / auto availability"],
+                 "weather snapshot (Open-Meteo)", "bus-stop and metro-station locations (OSM)", "area zones (OSM main road)",
+                 "Nagpur Metro lines, stops and hours (OSM relations)"],
+        "synthetic": ["incident history", "bus routes E1-E4 (estimated: no open bus data for Nagpur; hours unknown)",
+                      "traffic", "live bus / metro status", "road closures"],
     }
     return graph, pois, places, weather, incidents, sched, meta
 

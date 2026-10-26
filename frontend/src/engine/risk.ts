@@ -146,7 +146,7 @@ export function edgeRisk(s: State, t: number, cache: OpenCache): EdgeRisk {
     for (const e of c.edges) {
       if (c.status === "UNKNOWN") { hi[T + e] += 0.3; continue; }                 // too old to trust: widen, do not block
       if (w.carOk[e]) carBlocked[e] = 1;                                           // barricades stop vehicles
-      if (c.kind === "waterlogging") walkBlocked[e] = 1;                           // floods stop everyone
+      if (c.kind === "waterlogging" || c.kind === "closure") walkBlocked[e] = 1;  // floods and police barricades stop walkers too (U4: no own vehicle)
       else { lo[T + e] += 0.2; hi[T + e] += 0.35; }                                // walkers pass, but it is unpleasant
     }
   }

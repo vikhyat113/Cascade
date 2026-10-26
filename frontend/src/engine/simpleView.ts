@@ -15,14 +15,14 @@ import type { PoiView } from "./services";
 import type { CityTime } from "./time";
 
 export type LatLon = [number, number];
-export interface Step { icon: "walk" | "wait" | "bus" | "metro" | "cab"; minutes: number; text: string; line?: string }
+export interface Step { icon: "walk" | "wait" | "bus" | "metro"; minutes: number; text: string; line?: string }
 export interface PlaceOnWay { id: string; type: string; name: string; distance_m: number; distance_text: string; state: "open" | "maybe_open" | "not_sure"; state_text: string; lat: number; lon: number; minutes?: number; minutes_text?: string; path?: LatLon[]; phone?: string | null }
 export interface Option {
   id: string; label: string; tab: boolean; plan_id: string; kind: string; same_as: string | null; same_text?: string;
   arrive_text: string; arrive_time: string | null; timing: "on_time" | "maybe_late" | "too_late" | "none"; timing_text: string | null; late_text: string | null;
   safety_level: "safe" | "ok" | "careful"; safety_text: string; safety_reason: string; steps: Step[];
-  warning: { text: string; pill: string | null; backup_option_id: string | null } | null; backup_option_id?: string | null;
-  places: PlaceOnWay[]; path: LatLon[]; start: LatLon | null; end: LatLon | null;
+  warning: { text: string; pill: string | null; backup_option_id: string | null; safe_wait?: boolean } | null; backup_option_id?: string | null;
+  places: PlaceOnWay[]; path: LatLon[]; start: LatLon | null; end: LatLon | null; changes: LatLon[];
 }
 export interface TripState { option_id: string; step_index: number; progress: number; arrived: boolean; next_text: string; next_icon: string; minutes_left: number; position: LatLon | null }
 export interface SimpleView {
@@ -148,7 +148,7 @@ export class SimpleViewBuilder {
       timing_text: ({ on_time: t("label.onTime"), maybe_late: t("label.couldBeLate"), too_late: t("label.tooLate") } as Record<string, string>)[timing] ?? null,
       late_text: timing === "maybe_late" && p.eta.worst ? t("fmt.maybe", { time: this.city.clock(p.eta.worst)! }) : null,
       safety_level: level, safety_text: t(level === "safe" ? "label.safe" : level === "ok" ? "label.ok" : "label.careful"),
-      safety_reason: this.reason(p, level), steps: this.steps(p), warning, places: this.places(p), path,
+      safety_reason: this.reason(p, level), steps: this.steps(p), warning, places: this.places(p), changes: p.segments.filter((x) => x.mode === "wait" && x.change).map((x) => x.coords[0]), path,
       start: path[0] ?? null, end: path[path.length - 1] ?? null,
     }, backup];
   }
@@ -173,8 +173,7 @@ export class SimpleViewBuilder {
     const cats = new Map(p.trust.categories.map((c) => [c.name, c]));
     const outdoor = Math.min(1, p.outdoorMin / (p.durationMin.expected || 1));
     const pos: [CopyKey, number][] = [], neg: [CopyKey, number][] = [];
-    if (p.kind === "cab") pos.push(["reason.inVehicle", Math.max(0.45, 1 - outdoor)]);
-    else if ((p.kind === "bus" || p.kind === "metro") && outdoor < 0.5) pos.push(["reason.inVehicle", 1 - outdoor]);
+    if ((p.kind === "bus" || p.kind === "metro") && outdoor < 0.5) pos.push(["reason.inVehicle", 1 - outdoor]);
     const light = cats.get("lighting");
     if (light && p.walkM >= 150) {
       if (light.status === "KNOWN" && r.lighting <= 0.35) pos.push(["reason.lit", 0.9 - r.lighting]);
@@ -185,7 +184,7 @@ export class SimpleViewBuilder {
     if (["shop", "food", "pharmacy", "fuel"].some((x) => open.has(x))) pos.push(["reason.shopsOpen", 0.7]);
     if (r.emergency <= 0.15 || open.has("hospital") || open.has("police")) pos.push(["reason.helpNear", 0.5]);
     else if (r.emergency >= 0.6) neg.push(["reason.helpFar", r.emergency]);
-    if (p.walkM > 0 && p.walkM <= 400 && p.kind !== "cab") pos.push(["reason.shortWalk", 0.4]);
+    if (p.walkM > 0 && p.walkM <= 400) pos.push(["reason.shortWalk", 0.4]);
     if (p.walkM >= 2000) neg.push(["reason.longWalk", Math.min(1, p.walkM / 4000)]);
     if (r.incident >= 0.4) neg.push(["reason.incidents", r.incident]);
     if (r.isolation >= 0.45) neg.push(["reason.quiet", r.isolation]);
@@ -212,24 +211,21 @@ export class SimpleViewBuilder {
     let key: CopyKey | null = null, st: Status | null = null;
     if (weak && (weak.status === "OUTDATED" || weak.status === "UNKNOWN")) {
       st = weak.status;
-      const m: Record<string, CopyKey> = { transit_timing: "line.busGuess", cab_availability: "line.cabGuess", traffic: st === "OUTDATED" ? "line.trafficOld" : "line.trafficNotSure",
+      const m: Record<string, CopyKey> = { transit_timing: weak.detail.includes("hours not known") ? "line.busHoursNotSure" : "line.busGuess",
+        traffic: st === "OUTDATED" ? "line.trafficOld" : "line.trafficNotSure",
         closures: st === "OUTDATED" ? "line.roadsOld" : "line.roadsNotSure", weather: "line.weatherNotSure" };
       key = m[weak.name] ?? null;
     } else if (weak?.status === "PROBABLE") {
-      // PROBABLE is normal for a timetable or a cab estimate; it matters when live bus info is lost
-      // or when the guess could make you late
+      // PROBABLE is normal for a timetable; it matters when live bus info is lost
       if (weak.name === "transit_timing" && weak.detail.includes("timetable")) { key = "line.busGuess"; st = "PROBABLE"; }
-      else if (weak.name === "cab_availability" && (timing === "maybe_late" || timing === "too_late")) { key = "line.cabGuess"; st = "PROBABLE"; }
     }
-    if (!key && p.kind === "walk" && (timing === "maybe_late" || timing === "too_late") && this.ps.notes.some((n) => n.includes("no service") || n.includes("no catchable"))) {
-      const cab = this.plans.find((q) => q.kind === "cab");
-      if (cab) return [{ text: this.t("line.noBusTryCab"), pill: null, backup_option_id: null }, cab.id];
-    }
+    void timing;
     const light = p.trust.categories.find((c) => c.name === "lighting");
     if (!key && light?.status === "UNKNOWN" && p.walkM >= 300) { key = "line.lightsNotSure"; st = "UNKNOWN"; }
     if (!key) return [null, null];
     const alt = choosePlanB(p, this.plans);
-    return [{ text: this.t(key), pill: st && PILL[st] ? this.t(PILL[st]!) : null, backup_option_id: null }, alt?.plan.id ?? null];
+    // no other way: the Backup is waiting somewhere safe (UPGRADE §5.1), never a made-up option
+    return [{ text: this.t(key), pill: st && PILL[st] ? this.t(PILL[st]!) : null, backup_option_id: null, safe_wait: !alt }, alt?.plan.id ?? null];
   }
 
   private toName(name: string): string {
@@ -242,13 +238,15 @@ export class SimpleViewBuilder {
 
   private steps(p: Plan): Step[] {
     const t = this.t;
-    return p.segments.map((s) => {
+    // a few metres on foot between two rides (same stand) is part of the change, not a step of its own
+    const segs = p.segments.filter((s, i) => !(s.mode === "walk" && s.distanceM < 30 && i > 0 && i < p.segments.length - 1));
+    return segs.map((s) => {
       const minutes = Math.max(1, Math.round((s.durationS.expected ?? 0) / 60));
       const to = this.toName(s.to);
       if (s.mode === "walk") return { icon: "walk", minutes, text: t("fmt.walkTo", { dist: this.dist(s.distanceM), place: to }) } as Step;
-      if (s.mode === "wait") return { icon: "wait", minutes, text: s.cab ? t("fmt.waitCab") : s.haven ? t("fmt.waitInside", { place: shortPlace(s.haven) }) : t("fmt.waitBus", { line: s.routeId ?? "" }) } as Step;
-      if (s.mode === "bus" || s.mode === "metro") return { icon: s.mode, line: s.routeId, minutes, text: s.mode === "bus" ? t("fmt.busTo", { line: s.routeId ?? "", place: to }) : t("fmt.metroTo", { place: to }) } as Step;
-      return { icon: "cab", minutes, text: t("fmt.cabTo", { place: to }) } as Step;
+      if (s.mode === "wait") return { icon: "wait", minutes, text: s.haven ? t("fmt.waitInside", { place: shortPlace(s.haven) })
+        : s.change ? t("fmt.changeWait", { n: minutes }) : t("fmt.waitBus", { line: s.routeId ?? "" }) } as Step;
+      return { icon: s.mode, line: s.routeId, minutes, text: s.mode === "bus" ? t("fmt.busTo", { line: s.routeId ?? "", place: to }) : t("fmt.metroTo", { place: to }) } as Step;
     });
   }
 

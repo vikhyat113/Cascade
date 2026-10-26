@@ -11,6 +11,7 @@ import { shortestPath } from "./world";
 export const NEED_TYPES: Record<string, string[]> = {
   medicine: ["pharmacy", "hospital"], pharmacy: ["pharmacy"], hospital: ["hospital", "clinic"], police: ["police"],
   food: ["food", "shop"], atm: ["atm"], fuel: ["fuel"], toilets: ["toilets"], doctor: ["hospital", "clinic"],
+  safe: ["police", "hospital", "fuel", "hotel", "pharmacy"],      // where to wait when no way runs (Backup)
 };
 
 export interface NeedResult {

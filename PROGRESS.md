@@ -65,6 +65,15 @@
 - Status pill moved left, map credit under it, trip card and banners below the top row. No flag can hide SOS.
 - Tests: SOS unit test (label + screen-reader name in EN/HI, size, layer) and `npm run e2e` (Chrome, 360 px, EN + HI: first screen, home, about, demo drawer, search, open now, result, trip, help: visible, 56 px, not covered; Call 112 first). All pass.
 
+### U4: no cab; Metro + estimated buses; transfers (done, tag up-4)
+- Transit data search (docs/TRANSIT_DATA.md): OSM has **0 bus routes**, real **Metro** (Orange, Aqua: 06:00-22:00, every 15 min); no GTFS exists. Buses: estimated routes **E1-E4** (Butibori - Wardha Road - Sitabuldi; IIIT (Waranga) - Butibori; Railway Station - Sitabuldi - Dharampeth; Sadar - Sitabuldi - Ajni), hours **unknown**. Template `data/manual_bus_routes.csv` for real routes.
+- Cab removed everywhere in the app (old code in `legacy/frontend-app-cab/`).
+- Transfers: up to 2 changes ("Change here. Wait about 16 min."), change stops on the map, at most 4 steps + "More steps".
+- Unknown hours: "Not sure buses run now." + Backup (another way, or Safe places); never preferred over a way expected to work. Demo: "Pretend night buses run (simulated)".
+- Fixed while testing: brute-force nearest-place search (689 ms → 84 ms per slice); 27 km walk offered as Backup; the simulated bus feed ignored the pretend switch.
+- Checks: 64 app tests (new: no invented night service, transfers IIIT → Dharampeth < 1.5 s, change wording, unknown-hours warning, grid search = brute force) + 53 backend tests; browser run of IIIT → Home at 2:15 AM with and without pretending.
+- Unverified on the phone: planning time for the long trip.
+
 ## Commands
 - Tests: `cd frontend && npm test` · SOS on every screen: `npm run build && npm run e2e` · Dev in Chrome: `npm run dev` · APK: `bash scripts/build-apk.sh` then `powershell -ExecutionPolicy Bypass -File scripts\push-apk.ps1`, install from Files → Downloads on the phone.
 

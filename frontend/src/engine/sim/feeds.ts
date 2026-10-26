@@ -42,7 +42,7 @@ export class FeedSimulator {
   }
 
   private activeTrips(now: number) {
-    return tripsFor(this.s.world, now).trips.filter((t) => t.times[0] >= now - 45 * 60000 && t.times[0] <= now + 60 * 60000);
+    return tripsFor(this.s.world, now, this.s.pretendNightBuses).trips.filter((t) => t.times[0] >= now - 45 * 60000 && t.times[0] <= now + 60 * 60000);
   }
 
   private evolveTruth(now: number, dtS: number): void {

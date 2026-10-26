@@ -13,7 +13,11 @@ export interface PoiJson { id: string; type: string; name: string | null; lat: n
 export interface PlaceJson { name: string; lat: number; lon: number; kind: string }
 export interface WeatherJson { fetched_at: string | null; hourly: Record<string, (number | null)[] | string[] | undefined> & { time: string[] } }
 export interface IncidentsJson { grid: { xmin: number; ymin: number; size: number; nx: number; ny: number }; risk: Record<string, number[]> }
-export interface RouteJson { id: string; name: string; mode: string; color?: string; stops: { id: string; name: string; lat: number; lon: number }[]; seg_s: number[]; service: { from: string; to: string; headway_min: number }[]; both_directions?: boolean; note?: string }
+export interface RouteJson {
+  id: string; name: string; mode: string; color?: string; stops: { id: string; name: string; lat: number; lon: number; est?: boolean }[]; seg_s: number[];
+  service: { from: string; to: string; headway_min: number }[]; both_directions?: boolean; note?: string;
+  hours_known?: boolean; headway_min?: number | null; source?: "osm" | "manual" | "estimated"; synthetic?: boolean;
+}
 export interface ScheduleJson { generated_at: string | null; synthetic: boolean; routes: RouteJson[] }
 export interface MetaJson {
   city_name: string; center: { lat: number; lon: number }; radius_m: number; tz_offset_min: number; seed: number;
@@ -36,8 +40,12 @@ export const ACTIVITY = new Set(["hospital", "police", "fire_station", "fuel", "
 export const EMERGENCY = new Set(["hospital", "police"]);
 
 export interface Poi { id: string; type: string; name: string; lat: number; lon: number; x: number; y: number; hours: string | null; phone: string | null; emergency: boolean; editedAt: number | null }
-export interface Stop { id: string; name: string; lat: number; lon: number; x: number; y: number }
-export interface Route { id: string; name: string; mode: string; color: string; stops: Stop[]; segS: number[]; service: RouteJson["service"]; both: boolean; note: string }
+export interface Stop { id: string; name: string; lat: number; lon: number; x: number; y: number; est?: boolean }
+/** `hoursKnown` false: when the route runs is not known (UNKNOWN), never invented (UPGRADE §5.3). */
+export interface Route {
+  id: string; name: string; mode: string; color: string; stops: Stop[]; segS: number[]; service: RouteJson["service"]; both: boolean; note: string;
+  hoursKnown: boolean; headwayMin: number | null; source: string; synthetic: boolean;
+}
 
 export class Grid {
   nx: number; ny: number;
@@ -63,11 +71,11 @@ export class World {
   m: number; eu: Int32Array; ev: Int32Array; elen: Float64Array; ehw: string[]; ename: (string | null)[]; egeom: number[][];
   emx: Float64Array; emy: Float64Array; isMain: Uint8Array; carOk: Uint8Array; ttFree: Float64Array;
   lightLo: Float32Array; lightHi: Float32Array; lightCode: Uint8Array; lightConf: Float32Array;
-  isoBase: Float32Array; walkTraffic: Float32Array; cell: Int32Array; tcell: Int32Array; czone: Int32Array;
   // places
   pois: Poi[]; facilities: Poi[]; places: { name: string; norm: string; lat: number; lon: number; kind: string }[];
   // models
-  incGrid: Grid; incRisk: Map<number, Float32Array>; tgrid: Grid; cgrid: Grid; zoneDensity: Float32Array;
+  isoBase: Float32Array; walkTraffic: Float32Array; cell: Int32Array; tcell: Int32Array;
+  incGrid: Grid; incRisk: Map<number, Float32Array>; tgrid: Grid;
   trafficCells: number[]; trafficBias: Float32Array; floodEdges: number[];
   routes: Map<string, Route>; scheduleGeneratedAt: number | null; scheduleSynthetic: boolean;
   weatherRows: Map<string, Record<string, number | null>>; weatherFetchedAt: number | null;
@@ -155,24 +163,17 @@ export class World {
     this.incGrid = new Grid(ig.xmin, ig.ymin, ig.size, ig.nx, ig.ny);
     this.incRisk = new Map(Object.entries(bundle.incidents.risk).map(([h, v]) => [Number(h), Float32Array.from(v)]));
     const half = meta.radius_m + 600;
-    this.cell = new Int32Array(m); this.tcell = new Int32Array(m); this.czone = new Int32Array(m);
+    this.cell = new Int32Array(m); this.tcell = new Int32Array(m);
     this.tgrid = new Grid(-half, -half, CONFIG.risk.trafficCellM, undefined, undefined, half);
-    this.cgrid = new Grid(-half, -half, CONFIG.risk.cabZoneM, undefined, undefined, half);
     const cells = new Set<number>();
     for (let e = 0; e < m; e++) {
       this.cell[e] = this.incGrid.index(this.emx[e], this.emy[e]);
       this.tcell[e] = this.tgrid.index(this.emx[e], this.emy[e]);
-      this.czone[e] = this.cgrid.index(this.emx[e], this.emy[e]);
       if (this.carOk[e]) cells.add(this.tcell[e]);
     }
     this.trafficCells = [...cells].sort((a, b) => a - b);
     const rng = new Rng(meta.seed);
     this.trafficBias = Float32Array.from({ length: this.tgrid.n }, () => rng.uniform(0.9, 1.05));
-    const dens = new Float32Array(this.cgrid.n);
-    for (const p of this.facilities) dens[this.cgrid.index(p.x, p.y)] += 1;
-    const pos = [...dens].filter((v) => v > 0).sort((a, b) => a - b);
-    const scale = Math.max(1, pos.length ? pos[Math.floor(pos.length * 0.75)] : 1);
-    this.zoneDensity = dens.map((v) => v / scale);
     // a few synthetic waterlogging-prone spots (heavy rain closes them)
     const cand: number[] = []; for (let e = 0; e < m; e++) if (["residential", "tertiary", "secondary", "unclassified"].includes(this.ehw[e])) cand.push(e);
     const seeds = Array.from({ length: Math.min(7, cand.length) }, () => cand[Math.floor(rng.next() * cand.length)]);
@@ -186,7 +187,9 @@ export class World {
     this.routes = new Map();
     for (const r of sch.routes || []) {
       if (!r.stops || r.stops.length < 2 || r.seg_s.length !== r.stops.length - 1) continue;
-      this.routes.set(r.id, { id: r.id, name: r.name, mode: r.mode || "bus", color: r.color || "#f59e0b", segS: r.seg_s, service: r.service, both: r.both_directions !== false, note: r.note || "",
+      const hoursKnown = r.hours_known ?? (r.service?.length ?? 0) > 0;
+      this.routes.set(r.id, { id: r.id, name: r.name, mode: r.mode || "bus", color: r.color || "#f59e0b", segS: r.seg_s, service: r.service ?? [], both: r.both_directions !== false, note: r.note || "",
+        hoursKnown, headwayMin: r.headway_min ?? r.service?.[0]?.headway_min ?? null, source: r.source ?? "estimated", synthetic: r.synthetic ?? sch.synthetic !== false,
         stops: r.stops.map((s) => ({ ...s, x: this.proj.x(s.lon), y: this.proj.y(s.lat) })) });
     }
 

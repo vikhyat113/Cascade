@@ -1,5 +1,5 @@
 // Icons + words + colour together (UI_SPEC §1.6). Emoji are light and render on cheap phones.
-export const STEP_ICON: Record<string, string> = { walk: "🚶", wait: "⏳", bus: "🚌", metro: "🚇", cab: "🚕", done: "🏁" };
+export const STEP_ICON: Record<string, string> = { walk: "🚶", wait: "⏳", bus: "🚌", metro: "🚇", done: "🏁" };
 export const PLACE_ICON: Record<string, string> = {
   pharmacy: "💊", hospital: "🏥", police: "👮", food: "🍲", shop: "🛒", fuel: "⛽", atm: "🏧", help: "🆘",
 };
