@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { useT, type CopyKey } from "../copy";
+import { MapIcon } from "../components/icons";
 import { QuietButton } from "../components/ui";
 import type { MoonLight } from "../engine/astronomy";
 import { call } from "../lib/engine";
 import type { LayerId, LayerState } from "../lib/layers";
 
 const ROWS: { id: LayerId; icon: string; key: CopyKey }[] = [
-  { id: "lit", icon: "💡", key: "label.streetsLit" },
-  { id: "heat", icon: "🌡️", key: "label.safetyHeat" },
-  { id: "help", icon: "🏥", key: "label.helpPlaces" },
-  { id: "weather", icon: "🌧️", key: "label.weather" },
-  { id: "night", icon: "🌃", key: "label.nightLights" },
+  { id: "lit", icon: "Lit", key: "label.streetsLit" },
+  { id: "heat", icon: "Heat", key: "label.safetyHeat" },
+  { id: "help", icon: "Aid", key: "label.helpPlaces" },
+  { id: "weather", icon: "Wx", key: "label.weather" },
+  { id: "night", icon: "NL", key: "label.nightLights" },
 ];
 const MOON: Record<MoonLight["level"], CopyKey> = { bright: "label.moonBright", some: "label.moonSome", none: "label.moonNone" };
 
@@ -19,9 +20,9 @@ export function LayersButton({ bottom, onOpen, active }: { bottom: number; onOpe
   const { t } = useT();
   return (
     <button onClick={onOpen} aria-label={t("label.layers")}
-      className={`fixed right-3 z-20 flex h-12 w-12 items-center justify-center rounded-full border-2 text-[1.3rem] shadow-xl ${active ? "border-accent bg-accent/25" : "border-edge bg-surface"}`}
+      className={`fixed right-3 z-20 flex h-12 w-12 items-center justify-center rounded-full border-2 shadow-xl ${active ? "border-accent bg-accent/25" : "border-edge bg-surface"}`}
       style={{ bottom: bottom + 12 }}>
-      <span aria-hidden="true">🗺️</span>
+      <MapIcon className={active ? "text-accent" : "text-soft"} />
     </button>
   );
 }
@@ -43,7 +44,7 @@ export function LayersSheet({ state, onChange, onClose, missing, nightDate, weat
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50" onClick={onClose}>
       <div className="scroll-quiet max-h-[85dvh] w-full max-w-[480px] space-y-2 overflow-y-auto rounded-t-3xl bg-surface p-5" onClick={(e) => e.stopPropagation()}
         role="dialog" aria-label={t("label.layers")}>
-        <h2 className="text-[1.4rem] font-bold">🗺️ {t("label.layers")}</h2>
+        <h2 className="text-[1.4rem] font-bold">{t("label.layers")}</h2>
         {ROWS.map((r) => (
           <div key={r.id}>
             <label className="flex min-h-12 cursor-pointer items-center justify-between gap-3 rounded-2xl bg-raised px-4">
@@ -86,7 +87,7 @@ export function LayersSheet({ state, onChange, onClose, missing, nightDate, weat
                   onChange={(e) => set({ strength: { ...state.strength, [k]: Number(e.target.value) / 100 } })} className="flex-1 accent-accent" />
               </label>
             ))}
-            {moon && <p><b>🌙 {t("label.moonLight")}:</b> {t(MOON[moon.level])}</p>}
+            {moon && <p><b>Moon: </b>{t(MOON[moon.level])}</p>}
             <p className="pt-1 font-semibold">{t("label.details")}</p>
             {lit !== null && <p className="text-soft">{t("fmt.detailLit", { n: lit })} {t("line.othersNotSure")}</p>}
             {nightDate && <p className="text-soft">{t("fmt.detailNight", { date: nightDate })}</p>}

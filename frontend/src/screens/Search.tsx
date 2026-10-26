@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../copy";
 import { call } from "../lib/engine";
 import { BackButton, Sheet } from "../components/ui";
+import { HomeIcon, WorkIcon, PinIcon } from "../components/icons";
 import type { Place } from "../types";
 
 /** Choose a place: type it, or pick it on the map. For "To", the choice can also be saved as Home / Work. */
@@ -33,8 +34,9 @@ export function Search({ field, onBack, onChoose, onPickMap, onHeight }: {
         <div className="mt-2.5 flex gap-2">
           {(["home", "work"] as const).map((slot) => (
             <button key={slot} onClick={() => setSave(save === slot ? null : slot)} aria-pressed={save === slot}
-              className={`min-h-11 rounded-full border px-4 font-semibold ${save === slot ? "border-accent bg-accent/15" : "border-edge bg-raised"}`}>
-              {slot === "home" ? `⌂ ${t("label.setHome")}` : `💼 ${t("label.setWork")}`}
+              className={`flex min-h-11 items-center gap-2 rounded-full border px-4 font-semibold ${save === slot ? "border-accent bg-accent/15" : "border-edge bg-raised"}`}>
+              {slot === "home" ? <HomeIcon /> : <WorkIcon />}
+              {slot === "home" ? t("label.setHome") : t("label.setWork")}
             </button>
           ))}
         </div>
@@ -51,7 +53,7 @@ export function Search({ field, onBack, onChoose, onPickMap, onHeight }: {
       </ul>
       {hits && hits.length === 0 && <p className="mt-2 text-[1.05rem] text-warn">{t("line.noResults")}</p>}
       <button onClick={() => onPickMap(save)} className="mt-3 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border border-edge bg-raised font-semibold">
-        📍 {t("label.pickOnMap")}
+        <PinIcon /> {t("label.pickOnMap")}
       </button>
     </Sheet>
   );

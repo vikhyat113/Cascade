@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { useT } from "../copy";
-import { Chevron } from "../components/icons";
+import { Chevron, HomeIcon, WorkIcon } from "../components/icons";
 import { BigButton, DemoChip, QuietButton, Sheet } from "../components/ui";
 import { useDemoActive } from "../lib/demoFlag";
 import type { Place } from "../types";
 
 export const NEEDS = [
-  { type: "medicine", icon: "💊", key: "label.medicine" },
-  { type: "food", icon: "🍲", key: "label.food" },
-  { type: "hospital", icon: "🏥", key: "label.hospital" },
-  { type: "police", icon: "👮", key: "label.police" },
+  { type: "medicine", icon: "Rx", key: "label.medicine" },
+  { type: "food", icon: "FD", key: "label.food" },
+  { type: "hospital", icon: "+", key: "label.hospital" },
+  { type: "police", icon: "PD", key: "label.police" },
 ] as const;
 
 export function Field({ label, value, onClick, empty }: { label: string; value: string; onClick: () => void; empty?: boolean }) {
@@ -47,7 +47,7 @@ export function SheetFooter({ showDemo, onDemo }: { showDemo: boolean; onDemo: (
   );
 }
 
-export function Home({ from, to, home, work, when, by, busy, error, onFrom, onTo, onPlace, onWhen, onBy, onFind, onNeed, showDemo, onDemo, onHeight }: {
+export function Home({ from, to, home: _home, work: _work, when, by, busy, error, onFrom, onTo, onPlace, onWhen, onBy, onFind, onNeed, showDemo, onDemo, onHeight }: {
   from: Place | null; to: Place | null; home: Place | null; work: Place | null; when: string | null; by: string | null;
   busy: boolean; error: string | null; onFrom: () => void; onTo: () => void; onPlace: (p: Place | "home" | "work") => void;
   onWhen: (v: string | null) => void; onBy: (v: string | null) => void; onFind: () => void; onNeed: (type: string) => void;
@@ -64,13 +64,14 @@ export function Home({ from, to, home, work, when, by, busy, error, onFrom, onTo
       <h1 className="mb-3 text-[1.5rem] font-bold">{t("line.whereTo")}</h1>
       <div className="space-y-2.5">
         <Field label={t("label.from")} value={fromName} onClick={onFrom} />
-        <Field label={t("label.to")} value={toName || "🔍"} empty={!toName} onClick={onTo} />
+        <Field label={t("label.to")} value={toName || t("line.searchHint")} empty={!toName} onClick={onTo} />
         <div className="grid grid-cols-2 gap-2.5">
-          {([["home", "⌂", home], ["work", "💼", work]] as const).map(([slot, icon, p]) => (
+          {(["home", "work"] as const).map((slot) => (
             <button key={slot} onClick={() => onPlace(slot)}
               className={`flex min-h-12 items-center justify-center gap-2 rounded-2xl border px-3 font-semibold ${to?.kind === slot ? "border-accent bg-accent/15 text-ink" : "border-edge bg-raised text-ink"}`}
-              aria-pressed={to?.kind === slot} title={p?.name}>
-              <span aria-hidden="true">{icon}</span>{t(slot === "home" ? "label.home" : "label.work")}
+              aria-pressed={to?.kind === slot}>
+              {slot === "home" ? <HomeIcon /> : <WorkIcon />}
+              {t(slot === "home" ? "label.home" : "label.work")}
             </button>
           ))}
         </div>
@@ -135,7 +136,7 @@ function About({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
       <div className="w-full max-w-[480px] space-y-3 rounded-t-3xl bg-surface p-5 text-[1.05rem]" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("label.about")}>
-        <h2 className="text-[1.5rem] font-bold">🌙 {t("label.appName")}</h2>
+        <h2 className="text-[1.5rem] font-bold">{t("label.appName")}</h2>
         <p>{t("line.aboutWhat")}</p>
         <p>{t("line.aboutOffline")}</p>
         <p className="font-semibold text-help">{t("line.call112Always")}</p>

@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
 import { useT } from "../copy";
-import { Chevron, PLACE_ICON, SAFETY, STATE, STEP_ICON, TIMING } from "../components/icons";
+import { Chevron, PLACE_ICON, SAFETY, STATE, STEP_ICON, TIMING, PinIcon } from "../components/icons";
 import { BackButton, BigButton, Sheet } from "../components/ui";
 import type { Option, Step } from "../types";
 import { SheetFooter } from "./Home";
@@ -122,7 +122,7 @@ export function Result({ options, shown, onTab, onBackup, onStart, onBack, showP
             <ul className="mt-1 space-y-1.5">
               {shown.places.map((p) => (
                 <li key={p.id} className="flex min-h-12 items-center gap-3 rounded-2xl bg-raised px-3">
-                  <span aria-hidden="true" className="text-[1.3rem]">{PLACE_ICON[p.type] || "📍"}</span>
+                  <span aria-hidden="true" className="text-[1.3rem] font-bold text-soft">{PLACE_ICON[p.type] || <PinIcon />}</span>
                   <span className="min-w-0 flex-1 truncate font-semibold">{p.name}</span>
                   <span className="text-soft">{p.distance_text}</span>
                   <span className={`font-semibold ${STATE[p.state].color}`}>{p.state_text}</span>

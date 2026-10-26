@@ -9,6 +9,7 @@ import { OtherWays, WAY_COLORS } from "./screens/OtherWays";
 import { THEME } from "./theme";
 import { SosButton } from "./components/SosButton";
 import { BackButton, Banner, DeviationBanner, Pill } from "./components/ui";
+import { Chevron } from "./components/icons";
 import { setDemoActive } from "./lib/demoFlag";
 import { DeviationMonitor } from "./engine/deviation";
 import { fakeGps, useFakeGps, usePosition } from "./lib/position";
@@ -39,6 +40,34 @@ export default function App() {
     return <Suspense fallback={null}><ScenariosPage /></Suspense>;
   }
   return <Main />;
+}
+
+/** Bottom info bar shown during map-pick mode, with collapse/expand toggle. */
+function PickBar({ onBack, label }: { onBack: () => void; label: string }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="fixed inset-x-0 bottom-6 z-20 flex justify-center px-3">
+      <div className="flex w-full max-w-[480px] flex-col rounded-3xl bg-surface shadow-xl overflow-hidden">
+        {/* toggle strip */}
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={open ? "Collapse bar" : "Expand bar"}
+          className="flex h-8 w-full items-center justify-center gap-1 border-b border-edge/40 text-[0.85rem] font-semibold text-soft hover:text-ink transition-colors"
+        >
+          <Chevron dir={open ? "down" : "up"} />
+          <span>{open ? "Hide" : "Show instructions"}</span>
+        </button>
+        {/* collapsible content */}
+        {open && (
+          <div className="flex items-center gap-2 px-3 py-3">
+            <BackButton onClick={onBack} />
+            <p className="text-[1.15rem] font-semibold">{label}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function Main() {
@@ -382,7 +411,7 @@ function Main() {
   if (!cfg) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center" role="status">
-        <span className="text-[2.5rem]" aria-hidden="true">🌙</span>
+      <span className="text-[2rem] font-bold text-accent" aria-hidden="true">NW</span>
         <p className="text-[1.2rem] font-semibold">{error || t("line.finding")}</p>
         <SosButton onPress={openHelp} />
         {help && <HelpSheet at={help.at} fresh={help.fresh} onClose={() => setHelp(null)} onGo={() => setHelp(null)} />}
@@ -418,12 +447,7 @@ function Main() {
           onPickMap={(save) => { setPickSave(save); setScreen("pick"); }} />
       )}
       {screen === "pick" && (
-        <div className="fixed inset-x-0 bottom-6 z-20 flex justify-center px-3">
-          <div className="flex w-full max-w-[480px] items-center gap-2 rounded-3xl bg-surface px-3 py-3 shadow-xl">
-            <BackButton onClick={() => setScreen("search")} />
-            <p className="text-[1.15rem] font-semibold">{t("line.tapMap")}</p>
-          </div>
-        </div>
+        <PickBar onBack={() => setScreen("search")} label={t("line.tapMap")} />
       )}
       {screen === "result" && shown && (
         <Result options={options} shown={shown} onTab={setShownId} onBackup={onBackup} onStart={start} starting={starting} lateAlert={lateAlert} setLateAlert={setLateAlert}

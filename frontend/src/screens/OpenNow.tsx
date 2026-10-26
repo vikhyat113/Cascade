@@ -1,5 +1,5 @@
 import { useT } from "../copy";
-import { PLACE_ICON, STATE } from "../components/icons";
+import { PLACE_ICON, STATE, PinIcon } from "../components/icons";
 import { BackButton, Sheet } from "../components/ui";
 import type { PlaceOnWay } from "../types";
 
@@ -21,7 +21,7 @@ export function OpenNow({ title, places, empty, onBack, onPick, onHeight }: {
         {(places || []).slice(0, 5).map((p) => (
           <li key={p.id}>
             <button onClick={() => onPick(p)} className="flex min-h-16 w-full items-center gap-3 rounded-2xl bg-raised px-3 text-left">
-              <span aria-hidden="true" className="text-[1.6rem]">{PLACE_ICON[p.type] || "📍"}</span>
+              <span aria-hidden="true" className="text-[1.6rem] text-soft">{PLACE_ICON[p.type] || <PinIcon />}</span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[1.1rem] font-bold">{p.name}</span>
                 <span className="block text-soft">{p.distance_text} · {p.minutes_text}</span>

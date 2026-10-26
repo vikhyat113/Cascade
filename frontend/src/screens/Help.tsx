@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useT, type CopyKey } from "../copy";
-import { PLACE_ICON } from "../components/icons";
+import { PLACE_ICON, PhoneIcon, ChatIcon } from "../components/icons";
 import { BigButton, QuietButton } from "../components/ui";
 import { call } from "../lib/engine";
 import { askForHelp, mapLink, smsHref, useHelp } from "../sos";
@@ -9,15 +9,15 @@ import type { SosType } from "../sos/types";
 import type { Place, PlaceOnWay } from "../types";
 
 const STATUS: Record<HelpStatus, { icon: string; key: CopyKey; color: string }> = {
-  sending: { icon: "⏳", key: "label.sending", color: "text-soft" },
-  passed_on: { icon: "📨", key: "label.passedOn", color: "text-accent" },
-  aware: { icon: "✅", key: "label.helpAware", color: "text-good" },
-  not_sure: { icon: "❔", key: "label.notSure", color: "text-warn" },
+  sending: { icon: "…", key: "label.sending", color: "text-soft" },
+  passed_on: { icon: "→", key: "label.passedOn", color: "text-accent" },
+  aware: { icon: "✓", key: "label.helpAware", color: "text-good" },
+  not_sure: { icon: "?", key: "label.notSure", color: "text-warn" },
 };
 const CHOICES: { type: SosType; icon: string; key: CopyKey }[] = [
-  { type: "danger", icon: "🚨", key: "cta.danger" },
-  { type: "medical", icon: "🩺", key: "cta.doctor" },
-  { type: "unsure", icon: "❓", key: "label.notSure" },
+  { type: "danger", icon: "!", key: "cta.danger" },
+  { type: "medical", icon: "+", key: "cta.doctor" },
+  { type: "unsure", icon: "?", key: "label.notSure" },
 ];
 
 function Overlay({ children, onClose, label }: { children: React.ReactNode; onClose: () => void; label: string }) {
@@ -33,7 +33,7 @@ function Overlay({ children, onClose, label }: { children: React.ReactNode; onCl
 
 const Call112 = () => {
   const { t } = useT();
-  return <a href="tel:112" className="flex min-h-14 w-full items-center justify-center rounded-2xl bg-help text-[1.25rem] font-bold text-white">📞 {t("label.call112")}</a>;
+  return <a href="tel:112" className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-help text-[1.25rem] font-bold text-white"><PhoneIcon className="text-white" /> {t("label.call112")}</a>;
 };
 
 export function TextContact({ at, late = false }: { at: Place | null; late?: boolean }) {
@@ -41,7 +41,7 @@ export function TextContact({ at, late = false }: { at: Place | null; late?: boo
   const body = at ? t(late ? "fmt.smsLate" : "fmt.smsHelp", { link: mapLink(at.lat, at.lon) }) : t("line.smsNoPlace");
   return (
     <a href={smsHref(body)} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-edge bg-raised px-4 font-semibold text-ink">
-      💬 {t("label.textContact")}
+      <ChatIcon /> {t("label.textContact")}
     </a>
   );
 }
@@ -67,9 +67,9 @@ export function HelpSheet({ at, fresh, onClose, onGo }: { at: Place | null; fres
   const WHO: Record<HelpTarget, CopyKey> = { police: "label.police", hospital: "label.hospital", fire: "label.fireStation", place: "label.peopleNearby" };
   return (
     <Overlay onClose={onClose} label={t("label.help")}>
-      <h2 className="text-[1.4rem] font-bold">🆘 {t("label.help")}</h2>
+      <h2 className="text-[1.4rem] font-bold">{t("label.help")}</h2>
       <Call112 />
-      {at && !fresh && <p className="text-[0.95rem] text-soft">📍 {t("line.usingLastPlace")}</p>}
+      {at && !fresh && <p className="text-[0.95rem] text-soft">{t("line.usingLastPlace")}</p>}
       {!at && <p className="text-[1.05rem] font-semibold text-warn">{t("line.noPlaceCall")}</p>}
       {choosing && at && CHOICES.map((c) => (
         <button key={c.type} onClick={() => { setAgain(false); askForHelp(c.type, at); }}
@@ -94,14 +94,14 @@ export function HelpSheet({ at, fresh, onClose, onGo }: { at: Place | null; fres
                 <p className="truncate text-[1.1rem] font-bold">{target.name}</p>
                 <p className="text-soft">{target.distance_text}</p>
               </div>
-              {target.phone && <a href={`tel:${target.phone}`} className="flex min-h-12 items-center rounded-xl border border-edge px-4 font-bold">📞 {t("label.call")}</a>}
+              {target.phone && <a href={`tel:${target.phone}`} className="flex min-h-12 items-center gap-1 rounded-xl border border-edge px-4 font-bold"><PhoneIcon /> {t("label.call")}</a>}
               <button onClick={() => onGo(target)} className="min-h-12 rounded-xl bg-accent px-3 font-bold text-accent-ink">{t("label.takeMeThere")}</button>
             </div>
           )}
         </div>
       )}
       {!choosing && help && (help.status === "aware" || help.status === "not_sure") && (
-        <QuietButton className="w-full" onClick={() => setAgain(true)}>🆘 {t("label.needHelp")}</QuietButton>
+        <QuietButton className="w-full" onClick={() => setAgain(true)}>{t("label.needHelp")}</QuietButton>
       )}
       <TextContact at={at} />
       <QuietButton className="w-full" onClick={onClose}>{t("label.close")}</QuietButton>
@@ -115,11 +115,11 @@ export function SafetySheet({ at, late, onHome, onHelp, ok = false }: { at: Plac
   const title = t(ok ? "line.areYouOk" : "line.areYouHome");
   return (
     <Overlay onClose={() => {}} label={title}>
-      <h2 className="text-[1.6rem] font-bold">{ok ? "🙋" : "🏠"} {title}</h2>
+      <h2 className="text-[1.6rem] font-bold">{title}</h2>
       {late && <p className="text-[1.1rem] font-semibold text-warn">{t("line.lateText")}</p>}
       {late && <TextContact at={at} late />}
       <BigButton onClick={onHome}>{t(ok ? "label.imFine" : "label.imHome")}</BigButton>
-      <BigButton tone="help" onClick={onHelp}>🆘 {t("label.needHelp")}</BigButton>
+      <BigButton tone="help" onClick={onHelp}>{t("label.needHelp")}</BigButton>
     </Overlay>
   );
 }
