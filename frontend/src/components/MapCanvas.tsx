@@ -25,6 +25,11 @@ type Props = {
   fitKey?: string;
   bottomPad: number;
   offline: boolean;
+  layerVersion?: number;
+  routes?: import("../types").RouteItem[];
+  selectedRouteId?: string;
+  onSelectRoute?: (id: string) => void;
+  showDominated?: boolean;
   onPick?: ((lat: number, lon: number) => void) | null;
   onTakeMeThere?: ((p: { lat: number; lon: number; name: string }) => void) | null;
   onFacilityCounts?: ((counts: { medicine: number; food: number; hospital: number; police: number }) => void) | null;
@@ -122,6 +127,277 @@ function thermalColor(tempC: number | null): string {
   return "#d73027";
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  let c = hex.replace("#", "");
+  if (c.length === 3) c = c.split("").map((x) => x + x).join("");
+  const num = parseInt(c, 16);
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
+
+// 1. Bilinear Smooth Surface: masks any quad having an UNKNOWN corner cell
+function renderSmoothLayer(
+  fc: any,
+  colorFn: (val: number | null) => string,
+  rg: L.LayerGroup,
+  opacity: number,
+  map: L.Map | null
+) {
+  const feats = (fc.features || []).filter(
+    (f: any) => f.properties && f.properties.lat != null && f.properties.lon != null
+  );
+  if (feats.length === 0) return;
+
+  const latsSet = new Set<number>();
+  const lonsSet = new Set<number>();
+  feats.forEach((f: any) => {
+    latsSet.add(Math.round(f.properties.lat * 10000) / 10000);
+    lonsSet.add(Math.round(f.properties.lon * 10000) / 10000);
+  });
+
+  const lats = Array.from(latsSet).sort((a, b) => a - b);
+  const lons = Array.from(lonsSet).sort((a, b) => a - b);
+  if (lats.length < 2 || lons.length < 2) return;
+
+  const minLat = lats[0];
+  const maxLat = lats[lats.length - 1];
+  const minLon = lons[0];
+  const maxLon = lons[lons.length - 1];
+
+  const cellMap = new Map<string, { val: number | null; isUnknown: boolean; prop: any }>();
+  feats.forEach((f: any) => {
+    const p = f.properties;
+    const rLat = Math.round(p.lat * 10000) / 10000;
+    const rLon = Math.round(p.lon * 10000) / 10000;
+    const row = lats.indexOf(rLat);
+    const col = lons.indexOf(rLon);
+    if (row !== -1 && col !== -1) {
+      const isUnknown = p.status === "UNKNOWN" || p.value === null || p.value === undefined;
+      cellMap.set(`${row}_${col}`, {
+        val: isUnknown ? null : Number(p.value),
+        isUnknown,
+        prop: p,
+      });
+    }
+  });
+
+  const canvas = document.createElement("canvas");
+  const W = 220;
+  const H = 220;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const imgData = ctx.createImageData(W, H);
+  const data = imgData.data;
+
+  for (let py = 0; py < H; py++) {
+    const lat = maxLat - (py / (H - 1)) * (maxLat - minLat);
+    let r0 = 0;
+    while (r0 < lats.length - 2 && lats[r0 + 1] < lat) r0++;
+    const r1 = Math.min(lats.length - 1, r0 + 1);
+
+    for (let px = 0; px < W; px++) {
+      const lon = minLon + (px / (W - 1)) * (maxLon - minLon);
+      let c0 = 0;
+      while (c0 < lons.length - 2 && lons[c0 + 1] < lon) c0++;
+      const c1 = Math.min(lons.length - 1, c0 + 1);
+
+      const p00 = cellMap.get(`${r0}_${c0}`);
+      const p10 = cellMap.get(`${r0}_${c1}`);
+      const p01 = cellMap.get(`${r1}_${c0}`);
+      const p11 = cellMap.get(`${r1}_${c1}`);
+
+      const pIdx = (py * W + px) * 4;
+
+      // HONESTY RULE: If ANY contributing cell is UNKNOWN, mask it out (transparent)
+      if (!p00 || !p10 || !p01 || !p11 || p00.isUnknown || p10.isUnknown || p01.isUnknown || p11.isUnknown) {
+        data[pIdx + 3] = 0;
+        continue;
+      }
+
+      const u = (lon - lons[c0]) / Math.max(1e-6, lons[c1] - lons[c0]);
+      const v = (lat - lats[r0]) / Math.max(1e-6, lats[r1] - lats[r0]);
+      const uClamped = Math.max(0, Math.min(1, u));
+      const vClamped = Math.max(0, Math.min(1, v));
+
+      const v00 = p00.val!;
+      const v10 = p10.val!;
+      const v01 = p01.val!;
+      const v11 = p11.val!;
+
+      const interpolated =
+        (1 - uClamped) * (1 - vClamped) * v00 +
+        uClamped * (1 - vClamped) * v10 +
+        (1 - uClamped) * vClamped * v01 +
+        uClamped * vClamped * v11;
+
+      const hex = colorFn(interpolated);
+      const [r, g, b] = hexToRgb(hex);
+      data[pIdx] = r;
+      data[pIdx + 1] = g;
+      data[pIdx + 2] = b;
+      data[pIdx + 3] = Math.round(opacity * 230);
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+
+  const overlay = L.imageOverlay(canvas.toDataURL(), [[minLat, minLon], [maxLat, maxLon]], {
+    pane: "rasterPane",
+    opacity: 1,
+    interactive: true,
+  });
+
+  overlay.on("click", (e: L.LeafletMouseEvent) => {
+    let bestCell: any = null;
+    let minDist = Infinity;
+    feats.forEach((f: any) => {
+      const d = (f.properties.lat - e.latlng.lat) ** 2 + (f.properties.lon - e.latlng.lng) ** 2;
+      if (d < minDist) {
+        minDist = d;
+        bestCell = f.properties;
+      }
+    });
+    if (bestCell && map) {
+      const isUnknown = bestCell.status === "UNKNOWN" || bestCell.value === null;
+      const content = isUnknown
+        ? `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;color:#f87171">No data (cloud-masked or not observed)</div><div style="font-size:11px;color:#94a3b8;margin-top:2px">Status: UNKNOWN</div></div>`
+        : `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;font-size:14px;color:#f4f6ff">${bestCell.value} ${bestCell.unit || ""}</div><div style="font-size:11px;color:#34d399">Status: ${bestCell.status || "Known"}</div><div style="font-size:10px;color:#94a3b8;margin-top:2px">Smoothed for display. True resolution native cell.</div></div>`;
+      L.popup({ className: "nw-popup" })
+        .setLatLng(e.latlng)
+        .setContent(content)
+        .openOn(map);
+    }
+  });
+
+  overlay.addTo(rg);
+}
+
+// 2. Streets Mode: color and glow street segments by lighting or observation
+function renderStreetsLayer(
+  layerType: "viirs" | "thermal" | "weather",
+  fc: any,
+  streetsFc: any,
+  colorFn: (val: number | null) => string,
+  rg: L.LayerGroup,
+  opacity: number
+) {
+  const cells = (fc.features || []).filter(
+    (f: any) => f.properties && f.properties.lat != null && f.properties.lon != null
+  );
+
+  L.geoJSON(streetsFc, {
+    pane: "rasterPane",
+    style: (feature) => {
+      const geom = feature?.geometry as any;
+      const coords = geom?.coordinates || [];
+      const light = feature?.properties?.light ?? 0;
+      let midLat = 0;
+      let midLon = 0;
+      if (coords.length > 0) {
+        const midIdx = Math.floor(coords.length / 2);
+        midLon = coords[midIdx][0];
+        midLat = coords[midIdx][1];
+      }
+
+      let nearestVal: number | null = null;
+      let minDist = Infinity;
+      for (const c of cells) {
+        const d = (c.properties.lat - midLat) ** 2 + (c.properties.lon - midLon) ** 2;
+        if (d < minDist) {
+          minDist = d;
+          nearestVal = c.properties.value ?? c.properties.radiance ?? null;
+        }
+      }
+
+      if (layerType === "viirs") {
+        // Real OSM lit tags or mapped street lamps = solid, KNOWN
+        if (light === 3) {
+          return { color: "#ffffff", weight: 3.5, opacity: 0.95 * opacity };
+        }
+        // Main-road prior = solid
+        if (light === 2) {
+          return { color: "#f59e0b", weight: 2.5, opacity: 0.85 * opacity };
+        }
+        // Lighting is UNKNOWN: use VIIRS value as PROBABLE prior drawn dashed & lower opacity
+        if (nearestVal !== null && nearestVal > 0) {
+          return {
+            color: viirsColor(nearestVal),
+            weight: 2.2,
+            opacity: 0.65 * opacity,
+            dashArray: "4, 4",
+          };
+        }
+        // No data draw hatched grey
+        return {
+          color: "#64748b",
+          weight: 1.5,
+          opacity: 0.45 * opacity,
+          dashArray: "2, 4",
+        };
+      } else {
+        if (nearestVal !== null) {
+          return { color: colorFn(nearestVal), weight: 2.5, opacity: 0.85 * opacity };
+        }
+        return { color: "#475569", weight: 1.5, opacity: 0.4 * opacity, dashArray: "2, 4" };
+      }
+    },
+    onEachFeature: (feature, l) => {
+      const p = feature.properties || {};
+      const light = p.light ?? 0;
+      let note = "";
+      if (layerType === "viirs") {
+        if (light === 3) note = "OSM lit tag / mapped street lamps (solid, KNOWN)";
+        else if (light === 2) note = "Main-road prior (solid, PROBABLE)";
+        else note = "OSM lighting UNKNOWN. VIIRS estimate drawn dashed (PROBABLE prior)";
+      } else {
+        note = `Street segment colored by nearest ${layerType} observation.`;
+      }
+      const content = `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;color:#f4f6ff">${p.name || "Street"}</div><div style="font-size:11px;color:#38bdf8;margin-top:2px">${note}</div></div>`;
+      l.bindPopup(content, { className: "nw-popup" });
+    },
+  }).addTo(rg);
+}
+
+// 3. Cells Mode: Native-resolution blocks
+function renderCellsLayer(
+  fc: any,
+  colorFn: (val: number | null) => string,
+  rg: L.LayerGroup,
+  opacity: number
+) {
+  L.geoJSON(fc, {
+    pane: "rasterPane",
+    style: (feature) => {
+      const props = feature?.properties || {};
+      const isUnknown = props.status === "UNKNOWN" || props.value === null || props.value === undefined;
+      if (isUnknown) {
+        return {
+          fillColor: "#475569",
+          fillOpacity: 0.85 * opacity,
+          color: "#64748b",
+          weight: 1,
+          dashArray: "3, 3",
+        };
+      }
+      return {
+        fillColor: colorFn(props.value),
+        fillOpacity: opacity,
+        stroke: false,
+      };
+    },
+    onEachFeature: (feature, l) => {
+      const p = feature.properties || {};
+      const isUnknown = p.status === "UNKNOWN" || p.value === null || p.value === undefined;
+      const content = isUnknown
+        ? `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;color:#f87171">No data (cloud-masked or not observed)</div><div style="font-size:11px;color:#94a3b8;margin-top:2px">Status: UNKNOWN</div></div>`
+        : `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;font-size:14px;color:#f4f6ff">${p.value} ${p.unit || ""}</div><div style="font-size:11px;color:#34d399">Status: ${p.status || "Known"}</div><div style="font-size:10px;color:#94a3b8;margin-top:2px">Native cell resolution.</div></div>`;
+      l.bindPopup(content, { closeButton: false, className: "nw-popup" });
+    },
+  }).addTo(rg);
+}
+
 export function MapCanvas({
   center,
   boundary,
@@ -138,6 +414,11 @@ export function MapCanvas({
   fitKey,
   bottomPad,
   offline,
+  layerVersion = 0,
+  routes,
+  selectedRouteId,
+  onSelectRoute,
+  showDominated = false,
   onPick,
   onTakeMeThere,
   onFacilityCounts,
@@ -150,6 +431,7 @@ export function MapCanvas({
   const rasterGroup = useRef<L.LayerGroup | null>(null);
   const clusterGroup = useRef<any>(null);
   const streets = useRef<L.GeoJSON | null>(null);
+  const streetsCache = useRef<GeoJSON.FeatureCollection | null>(null);
   const tileErrors = useRef(0);
   const initialFitDone = useRef(false);
   const allPoisRef = useRef<FacilityPOI[]>([]);
@@ -406,7 +688,7 @@ export function MapCanvas({
     }
   }, [showDataCoverage]);
 
-  // Raster Layer Renderer (Native Resolution blocky cells with Leaflet Canvas)
+  // Raster Layer Renderer (Multi-mode: Streets, Smooth bilinear surface, or Native Cells)
   useEffect(() => {
     const rg = rasterGroup.current;
     if (!rg) return;
@@ -417,39 +699,33 @@ export function MapCanvas({
     // 1. VIIRS Night Lights
     if (layerState.viirs.enabled) {
       const opacity = layerState.viirs.opacity;
+      const mode = layerState.viirs.mode || "streets";
       api
         .layerData("viirs_ntl")
         .then((fc) => {
           if (!rasterGroup.current) return;
-          L.geoJSON(fc, {
-            pane: "rasterPane",
-            style: (feature) => {
-              const props = feature?.properties || {};
-              const isUnknown = props.status === "UNKNOWN" || props.value === null || props.value === undefined;
-              if (isUnknown) {
-                return {
-                  fillColor: "#475569",
-                  fillOpacity: 0.85 * opacity,
-                  color: "#64748b",
-                  weight: 1,
-                  dashArray: "3, 3",
-                };
+          if (mode === "smooth") {
+            renderSmoothLayer(fc, viirsColor, rasterGroup.current, opacity, map.current);
+          } else if (mode === "streets") {
+            const doRenderStreets = (stFc: any) => {
+              if (rasterGroup.current) {
+                renderStreetsLayer("viirs", fc, stFc, viirsColor, rasterGroup.current, opacity);
               }
-              return {
-                fillColor: viirsColor(props.value),
-                fillOpacity: opacity,
-                stroke: false,
-              };
-            },
-            onEachFeature: (feature, l) => {
-              const p = feature.properties || {};
-              const isUnknown = p.status === "UNKNOWN" || p.value === null || p.value === undefined;
-              const content = isUnknown
-                ? `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;color:#f87171">No data (cloud-masked or not observed)</div><div style="font-size:11px;color:#94a3b8;margin-top:2px">Status: UNKNOWN</div></div>`
-                : `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;font-size:14px;color:#f4f6ff">${p.value} ${p.unit}</div><div style="font-size:11px;color:#34d399">Percentile: ${p.percentile}% · Status: Known</div><div style="font-size:10px;color:#94a3b8;margin-top:2px">Acquisition: ${p.acquisition_time || "N/A"}</div></div>`;
-              l.bindPopup(content, { closeButton: false, className: "nw-popup" });
-            },
-          }).addTo(rg);
+            };
+            if (streetsCache.current) {
+              doRenderStreets(streetsCache.current);
+            } else {
+              api
+                .streetsAll()
+                .then((stFc) => {
+                  streetsCache.current = stFc;
+                  doRenderStreets(stFc);
+                })
+                .catch(() => renderCellsLayer(fc, viirsColor, rasterGroup.current!, opacity));
+            }
+          } else {
+            renderCellsLayer(fc, viirsColor, rasterGroup.current, opacity);
+          }
         })
         .catch(() => {});
     }
@@ -457,40 +733,36 @@ export function MapCanvas({
     // 2. Thermal Layer (Night surface LST or Air Temp)
     else if (layerState.thermal.enabled) {
       const opacity = layerState.thermal.opacity;
-      const layerId = layerState.thermal.source === "air_temp" ? "weather_grid" : "thermal_lst";
+      const mode = layerState.thermal.mode || "cells";
+      const isAir = layerState.thermal.source === "air_temp";
+      const layerId = isAir ? "weather_grid" : "thermal_lst";
+      const hour = isAir ? layerState.thermal.hour : undefined;
       api
-        .layerData(layerId, layerState.weather.hour)
+        .layerData(layerId, hour)
         .then((fc) => {
           if (!rasterGroup.current) return;
-          L.geoJSON(fc, {
-            pane: "rasterPane",
-            style: (feature) => {
-              const props = feature?.properties || {};
-              const isUnknown = props.status === "UNKNOWN" || props.value === null || props.value === undefined;
-              if (isUnknown) {
-                return {
-                  fillColor: "#475569",
-                  fillOpacity: 0.85 * opacity,
-                  color: "#64748b",
-                  weight: 1,
-                  dashArray: "3, 3",
-                };
+          if (mode === "smooth") {
+            renderSmoothLayer(fc, thermalColor, rasterGroup.current, opacity, map.current);
+          } else if (mode === "streets") {
+            const doRenderStreets = (stFc: any) => {
+              if (rasterGroup.current) {
+                renderStreetsLayer("thermal", fc, stFc, thermalColor, rasterGroup.current, opacity);
               }
-              return {
-                fillColor: thermalColor(props.value),
-                fillOpacity: opacity,
-                stroke: false,
-              };
-            },
-            onEachFeature: (feature, l) => {
-              const p = feature.properties || {};
-              const isUnknown = p.status === "UNKNOWN" || p.value === null || p.value === undefined;
-              const content = isUnknown
-                ? `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;color:#f87171">No data (cloud-masked or not observed)</div><div style="font-size:11px;color:#94a3b8;margin-top:2px">Status: UNKNOWN</div></div>`
-                : `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;font-size:14px;color:#f4f6ff">${p.value} ${p.unit}</div><div style="font-size:11px;color:#34d399">Status: ${p.status || "Known"}</div><div style="font-size:10px;color:#94a3b8;margin-top:2px">Acquisition: ${p.acquisition_time || "N/A"}</div></div>`;
-              l.bindPopup(content, { closeButton: false, className: "nw-popup" });
-            },
-          }).addTo(rg);
+            };
+            if (streetsCache.current) {
+              doRenderStreets(streetsCache.current);
+            } else {
+              api
+                .streetsAll()
+                .then((stFc) => {
+                  streetsCache.current = stFc;
+                  doRenderStreets(stFc);
+                })
+                .catch(() => renderCellsLayer(fc, thermalColor, rasterGroup.current!, opacity));
+            }
+          } else {
+            renderCellsLayer(fc, thermalColor, rasterGroup.current, opacity);
+          }
         })
         .catch(() => {});
     }
@@ -498,51 +770,50 @@ export function MapCanvas({
     // 3. Weather Forecast Grid
     else if (layerState.weather.enabled) {
       const opacity = layerState.weather.opacity;
+      const mode = layerState.weather.mode || "cells";
       api
         .layerData("weather_grid", layerState.weather.hour)
         .then((fc) => {
           if (!rasterGroup.current) return;
-          L.geoJSON(fc, {
-            pane: "rasterPane",
-            style: (feature) => {
-              const props = feature?.properties || {};
-              const isUnknown = props.status === "UNKNOWN" || props.value === null || props.value === undefined;
-              if (isUnknown) {
-                return {
-                  fillColor: "#475569",
-                  fillOpacity: 0.85 * opacity,
-                  color: "#64748b",
-                  weight: 1,
-                  dashArray: "3, 3",
-                };
+          if (mode === "smooth") {
+            renderSmoothLayer(fc, thermalColor, rasterGroup.current, opacity, map.current);
+          } else if (mode === "streets") {
+            const doRenderStreets = (stFc: any) => {
+              if (rasterGroup.current) {
+                renderStreetsLayer("weather", fc, stFc, thermalColor, rasterGroup.current, opacity);
               }
-              return {
-                fillColor: thermalColor(props.value),
-                fillOpacity: opacity,
-                stroke: false,
-              };
-            },
-            onEachFeature: (feature, l) => {
-              const p = feature.properties || {};
-              const isUnknown = p.status === "UNKNOWN" || p.value === null || p.value === undefined;
-              const content = isUnknown
-                ? `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;color:#f87171">No data</div></div>`
-                : `<div style="font-family:sans-serif;padding:2px"><div style="font-weight:bold;font-size:14px;color:#f4f6ff">${p.value} ${p.unit}</div><div style="font-size:11px;color:#60a5fa">Rain: ${p.precipitation ?? 0} mm · Wind: ${p.wind_speed_10m ?? 0} km/h</div><div style="font-size:10px;color:#94a3b8;margin-top:2px">Hour: ${p.time || p.hour + ":00"}</div></div>`;
-              l.bindPopup(content, { closeButton: false, className: "nw-popup" });
-            },
-          }).addTo(rg);
+            };
+            if (streetsCache.current) {
+              doRenderStreets(streetsCache.current);
+            } else {
+              api
+                .streetsAll()
+                .then((stFc) => {
+                  streetsCache.current = stFc;
+                  doRenderStreets(stFc);
+                })
+                .catch(() => renderCellsLayer(fc, thermalColor, rasterGroup.current!, opacity));
+            }
+          } else {
+            renderCellsLayer(fc, thermalColor, rasterGroup.current, opacity);
+          }
         })
         .catch(() => {});
     }
   }, [
     layerState?.viirs.enabled,
     layerState?.viirs.opacity,
+    layerState?.viirs.mode,
     layerState?.thermal.enabled,
     layerState?.thermal.opacity,
     layerState?.thermal.source,
+    layerState?.thermal.mode,
+    layerState?.thermal.hour,
     layerState?.weather.enabled,
     layerState?.weather.opacity,
+    layerState?.weather.mode,
     layerState?.weather.hour,
+    layerVersion,
   ]);
 
   // Facility Markers with Cluster Group
@@ -629,16 +900,83 @@ export function MapCanvas({
     poisLoaded,
   ]);
 
-  // Plan routes & markers
+  // Plan routes & markers (Multi-route engine support)
   useEffect(() => {
     const m = map.current;
     const g = layer.current;
     if (!m || !g) return;
     g.clearLayers();
-    if (path && path.length > 1) {
+
+    if (routes && routes.length > 0) {
+      const visibleRoutes = routes.filter((r) => !r.dominated || showDominated);
+      // Sort so recommended / selected route is drawn on top
+      const sortedRoutes = [...visibleRoutes].sort((a, b) => {
+        const aSel = selectedRouteId ? a.id === selectedRouteId : a.recommended;
+        const bSel = selectedRouteId ? b.id === selectedRouteId : b.recommended;
+        if (aSel && !bSel) return 1;
+        if (!aSel && bSel) return -1;
+        if (a.dominated && !b.dominated) return -1;
+        if (!a.dominated && b.dominated) return 1;
+        return 0;
+      });
+
+      for (const r of sortedRoutes) {
+        if (!r.polyline || r.polyline.length < 2) continue;
+        const isSelected = selectedRouteId ? r.id === selectedRouteId : r.recommended;
+
+        if (r.dominated) {
+          // Dominated: faint dashed
+          const poly = L.polyline(r.polyline, {
+            color: "#94a3b8",
+            weight: 3,
+            dashArray: "6, 6",
+            opacity: 0.5,
+            interactive: true,
+          }).addTo(g);
+          poly.on("click", () => onSelectRoute?.(r.id));
+        } else if (isSelected) {
+          // Recommended / Selected: thick solid
+          L.polyline(r.polyline, {
+            color: "#0a0f1e",
+            weight: 12,
+            opacity: 0.9,
+            interactive: false,
+          }).addTo(g);
+          const poly = L.polyline(r.polyline, {
+            color: ACCENT,
+            weight: 7,
+            opacity: 1.0,
+            interactive: true,
+          }).addTo(g);
+          poly.on("click", () => onSelectRoute?.(r.id));
+        } else {
+          // Others: thinner solid (labelled A, B, C...)
+          const poly = L.polyline(r.polyline, {
+            color: "#60a5fa",
+            weight: 4.5,
+            opacity: 0.85,
+            interactive: true,
+          }).addTo(g);
+          poly.on("click", () => onSelectRoute?.(r.id));
+
+          // Letter label badge marker at midpoint
+          const midIdx = Math.floor(r.polyline.length / 2);
+          const midPt = r.polyline[midIdx];
+          const badgeIcon = L.divIcon({
+            className: "",
+            iconSize: [22, 22],
+            iconAnchor: [11, 11],
+            html: `<div style="width:22px;height:22px;border-radius:50%;background:#2563eb;color:#ffffff;border:2px solid #ffffff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;box-shadow:0 2px 6px rgba(0,0,0,0.6);cursor:pointer">${r.label.replace("Way ", "")}</div>`,
+          });
+          const badgeMarker = L.marker(midPt, { icon: badgeIcon, interactive: true }).addTo(g);
+          badgeMarker.on("click", () => onSelectRoute?.(r.id));
+        }
+      }
+    } else if (path && path.length > 1) {
       L.polyline(path, { color: "#0a0f1e", weight: 11, opacity: 0.85, interactive: false }).addTo(g);
       L.polyline(path, { color: ACCENT, weight: 6, opacity: 1, interactive: false }).addTo(g);
     }
+
     if (start) L.circleMarker(start, { radius: 8, color: ACCENT, weight: 4, fillColor: "#fff", fillOpacity: 1 }).addTo(g);
     if (end) L.marker(end, { icon: pinIcon(), keyboard: false }).addTo(g);
     (places || []).forEach((p) => L.marker([p.lat, p.lon], { icon: placeIcon(p), title: p.name, alt: p.name }).addTo(g));
@@ -646,13 +984,22 @@ export function MapCanvas({
       L.marker(me, {
         icon: L.divIcon({ className: "", html: '<div class="nw-me"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),
       }).addTo(g);
-  }, [path, start, end, me, places]);
+  }, [routes, selectedRouteId, showDominated, onSelectRoute, path, start, end, me, places]);
 
   // Fit bounds when route or points change
   useEffect(() => {
     const m = map.current;
     if (!m) return;
     const pts: LatLon[] = [...(path || []), ...(places || []).map((p) => [p.lat, p.lon] as LatLon)];
+    if (routes && routes.length > 0) {
+      for (const r of routes) {
+        if (!r.dominated || showDominated) {
+          for (const c of r.polyline) {
+            pts.push(c);
+          }
+        }
+      }
+    }
     if (start) pts.push(start);
     if (end) pts.push(end);
     if (pts.length === 0) return;
@@ -665,15 +1012,36 @@ export function MapCanvas({
       paddingBottomRight: [28, bottomPad + 24],
       maxZoom: 16,
     });
-  }, [fitKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fitKey, routes, showDominated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activeSmoothBadge =
+    layerState?.viirs.enabled && layerState?.viirs.mode === "smooth"
+      ? "Smoothed for display. True resolution about 500 m."
+      : layerState?.thermal.enabled && layerState?.thermal.mode === "smooth"
+      ? "Smoothed for display. True resolution about 1 km."
+      : layerState?.weather.enabled && layerState?.weather.mode === "smooth"
+      ? "Smoothed for display. True resolution about 2 km."
+      : null;
 
   return (
-    <div
-      ref={box}
-      className="absolute inset-0 isolate z-0"
-      style={{ cursor: onPick ? "crosshair" : undefined }}
-      role="img"
-      aria-label="map"
-    />
+    <>
+      <div
+        ref={box}
+        className="absolute inset-0 isolate z-0"
+        style={{ cursor: onPick ? "crosshair" : undefined }}
+        role="img"
+        aria-label="map"
+      />
+      {activeSmoothBadge && (
+        <div
+          className="fixed bottom-24 left-4 z-20 flex items-center gap-2 rounded-xl border border-edge bg-surface/90 px-3 py-1.5 text-[0.76rem] font-semibold text-soft shadow-xl backdrop-blur-md"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="text-[0.9rem]" aria-hidden="true">🔍</span>
+          <span>{activeSmoothBadge}</span>
+        </div>
+      )}
+    </>
   );
 }

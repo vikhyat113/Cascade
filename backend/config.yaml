@@ -54,6 +54,12 @@ sources:
 # ---- Lighting Prior ----
 use_viirs_lighting_prior: false
 
+# ---- Live layer fetching flags (default false for offline determinism) ----
+live_weather: false
+live_satellite: false
+live_weather_interval_min: 15
+viirs_history_nights: 14
+
 # ---- Risk model ----
 risk:
   weights: {lighting: 0.24, incident: 0.24, isolation: 0.2, traffic: 0.1, weather: 0.1, emergency: 0.12}
@@ -78,6 +84,27 @@ planner:
   eta_change_log_s: 180
   stop_buffer_s: 60
   safe_haven_radius_m: 200
+
+# ---- Multi-route Engine (Yen's K-shortest paths with safety-aware cost) ----
+routing:
+  u: 0.5                     # uncertainty aversion blend: (1-u)*mid + u*hi
+  lambda: 1.0                # default safety vs speed preference weight
+  k_exposure: 0.8            # risk cost factor
+  k_paths: 8                 # Yen's candidate path limit (max 12)
+  max_k_paths: 12
+  time_budget_s: 1.5         # per-request time budget in seconds
+  corridor_buffer_m: 1500    # spatial corridor buffer around straight line
+  overlap_max: 0.7           # diversity filter max overlap threshold
+  cost_ratio_max: 1.6        # max cost ratio compared to best path
+  diverse_n: 4               # target diverse routes count
+  weights:
+    worst_safety: 0.4
+    deadline_slack: 0.25
+    outdoor_exposure: 0.15
+    unknown_share: 0.1
+    safe_haven_proximity: 0.1
+  tie_margin: 0.05           # score difference within which to flag a tie
+  tie_safety_overlap: 0.70   # safety interval overlap ratio above which to flag a tie
 
 # ---- Simple UI (UI_SPEC §4): how worst-case safety maps to Safe / OK / Be careful ----
 # UI_SPEC suggests 75 / 50. In this city the worst-case scores of real options sit
